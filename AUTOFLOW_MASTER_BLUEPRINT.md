@@ -1,170 +1,135 @@
-# AUTOFLOW PRO — COMPLETE REVERSE-ENGINEERED MASTER BLUEPRINT
-**Source:** Decoded Frame-by-Frame from YouTube Video `q6KugmxYwfQ` (*"I Automated Google Flow Completely — Images & Videos on Autopilot (100% FREE)"* by AIWaliSarkar)
+# ASIDZ AUTOFLOW PRO — MASTER SYSTEM SPECIFICATION & ARCHITECTURE
+**Product:** AsidZ AutoFlow Pro (Google Flow Enterprise Batch Generator & SaaS Cloud)
+**Platform:** Chrome Manifest V3 Side Panel + Chrome DevTools Protocol (CDP) + Cloud SaaS Backend
 
 ---
 
-## 1. Executive Summary & Exact Architecture
+## 1. Executive Summary & Core Architecture
 
-From frame-by-frame analysis of the source video (124 high-resolution extracted frames), the tool is an advanced Chrome Manifest V3 Extension that docks directly as a **Side Panel** (`chrome.sidePanel`) next to Google Flow (`flow.google.com`). 
+**AsidZ AutoFlow Pro** is a high-performance Chrome Manifest V3 automation extension and SaaS platform that docks as a native Side Panel (`chrome.sidePanel`) inside Google Flow (`flow.google.com`).
 
-### Critical Architecture Discovery: Chrome Debugger API
-In Frame 0001, Chrome displays:
-> **`'AIWaliSarkar AutoFlow' started debugging this browser`** [Cancel]
-
-This confirms the extension uses the **`chrome.debugger` (Chrome DevTools Protocol / CDP)** API:
-- Bypasses React synthetic event barriers and anti-bot checks.
-- Dispatches trusted hardware-level mouse clicks, keystrokes, and file drops.
-- Programmatically injects prompts, reference images, character tags, and clicks "Generate".
-- Works reliably even if Google updates internal React class names or button listeners.
+### Core Automation Engine: Chrome DevTools Protocol (CDP)
+The system leverages the **`chrome.debugger` (Chrome DevTools Protocol / CDP 1.3)** engine:
+- Bypasses React synthetic event barriers and anti-automation checks with trusted hardware-level mouse clicks, keystrokes, and file injections.
+- Injects multiline prompts, reference assets, character tags, and triggers Google Flow's generation dock directly at the browser rendering engine layer.
+- Strictly locked to Google Flow tabs—automatically disabling itself on any other active web page.
 
 ---
 
-## 2. Complete User Interface Breakdown
+## 2. User Interface Breakdown
 
-The extension UI is split into 3 main tabs: **`Control`**, **`Settings`**, and **`Logs`**.
+The Side Panel UI consists of 3 primary modules: **`Control`**, **`Settings`**, and **`Logs`**.
 
 ### 2.1 Header
-- **Profile / Identity:** Circular creator avatar with glowing magenta border, Title: `AIWaliSarkar AutoFlow`.
+- **Branding:** Official AsidZ circular logo with glowing accent border, Title: `AsidZ AutoFlow`.
 - **Subtitle:** `Batch videos & images on Google Flow, auto-downloaded.`
-- **Action Buttons:** `YouTube` button, `WhatsApp Channel` button.
-- **Connection Status:** Green glowing dot + `Connected to Google Flow`.
+- **Navigation:** Portal links to `asidz.com` and AsidZ Support.
+- **Connection Status:** Real-time indicator (`Connected to Google Flow`).
+- **Quota Monitor:** Dynamic daily generation tracking with 1-click Pro upgrade modal.
 
-### 2.2 Top Navigation Tabs
-- `Control` (Default active tab)
-- `Settings`
-- `Logs (99)` (Shows badge count of log entries)
+### 2.2 Navigation Tabs
+- `Control` (Default active workspace)
+- `Settings` (Operational tuning, paths, and license activation)
+- `Logs` (Real-time CDP debugging and event telemetry)
 
 ---
 
 ### 2.3 CONTROL TAB (The Generation Engine)
 
-#### A. MODE Grid (2x3 Card Matrix)
-Six distinct generation workflow modes:
-1. **`Text to Video`** — Converts raw prompt script into consecutive video generations.
-2. **`Frame to Video`** — Animates start-frame / end-frame image sequences into video.
-3. **`Ingredients to Video`** — Uses multiple reference images (characters, objects, environment) as ingredients.
-4. **`Text to Image`** — Bulk text-to-image generator using Nano Banana.
-5. **`Image to Image`** — Image transformation / editing with prompt.
-6. **`Agent Automation`** — Autonomous iterative generation agent.
+#### A. Generation Modes
+1. **`Text to Video`** — Converts batch prompt scripts into sequential cinematic video generations.
+2. **`Frame to Video`** — Animates start-frame and end-frame image sequences into video transitions.
+3. **`Ingredients to Video`** — Ingests multiple reference images (characters, objects, environment) as video ingredients.
+4. **`Text to Image`** — High-throughput text-to-image generator powered by Nano Banana 2.1.
+5. **`Image to Image`** — Image transformation, style transfer, and chained prompt iterations.
+6. **`Agent Automation`** — Autonomous iterative generation agent inside Google Flow.
 
-*Dynamic helper text below the selected card updates depending on mode (e.g., "Generate images from text", "Use images as ingredients (characters, objects, places) inside the video").*
-
-#### B. GENERATION Settings Block
-- **`Aspect ratio`** dropdown: `16:9 YouTube`, `9:16 Shorts/TikTok`, `1:1 Square`.
-- **`Outputs per prompt`** dropdown: `x1`, `x2`, `x3`, `x4`.
-- **`Model`** dropdown:
-  - Video: `Omni 1.1 Flash (Omni Flash)`, `Veo 2`, `Veo 3`.
+#### B. Generation Settings
+- **`Aspect ratio`**: `16:9 YouTube`, `9:16 Shorts/TikTok`, `1:1 Square`.
+- **`Outputs per prompt`**: `x1`, `x2`, `x3`, `x4`.
+- **`Model`**:
+  - Video: `Omni 1.1 Flash`, `Veo 2`, `Veo 3`.
   - Image: `Nano Banana 2.1`.
-- **`Image Option / Duration`** dropdown:
-  - Image mode: `New image each prompt` vs. `Chain: edit previous image`.
-  - Video mode: `Duration / chain`: `10s`, `5s`, `8s`.
+- **`Duration / Chain`**: `10s`, `8s`, `5s` or `Chain: edit previous image`.
 
-#### C. IMAGES Upload & Mapping Block (Visible in Image / Ingredients Mode)
-- **Dropzone Area:** Dashed border container:
-  > *"Click or drop images here. Name files like the word in your prompt (e.g. lion.png) to auto-pick them."*
-- **Thumbnail Strip:** Live image previews (`DRAGON_VILLAGE.jpg`, `ADULT_DRAGON.png`, etc.) with individual `(X)` delete buttons.
-- **`Max images per prompt`** dropdown: `1`, `2`, `3`, `4`.
-- **`Auto pick by name`** toggle switch: Matches words in the prompt with uploaded filenames automatically!
-- **`Remove all images`** button.
+#### C. Reference Images Dropzone & Keyword Mapping
+- **Asset Dropzone:** Drag and drop reference image files.
+- **Auto-Pick Matching:** Automatically matches keywords in prompts with uploaded image filenames (e.g. `mountain.png` matches the word "mountain").
+- **Asset Thumbnail Strip:** Dynamic preview chips with delete controls.
+- **`Max images per prompt`**: Configurable from `1` to `4`.
 
-#### D. VOICE (SPEAKER) Block (Visible in Video Mode)
-- **`Auto voice by name in prompt`** toggle switch.
-- **`Default voice`** dropdown (`None`, `Aoede`, `Alnilam`, etc.).
-- **`Sync voices from Flow`** button (e.g. "30 voices (built-in)").
-- **Context explanation:** *"Voice is picked after the @character, so Character + Voice go together. 'Sync' reads Flow's own voice library (incl. your custom voices)."*
+#### D. Voice (Speaker) Synchronization
+- **`Auto voice by name in prompt`**: Automatically applies voice profiles when voice directives are present.
+- **`Default voice`**: Flow voice library selection (`Aoede`, `Alnilam`, `Puck`, `Charon`, `Kore`, `Fenrir`).
+- **`Sync voices from Flow`**: Dynamically reads voice presets from the active Google Flow project.
 
-#### E. CHARACTERS Block
-- **`Auto @character by name`** toggle switch.
-- **`Scan characters from Flow`** button: Reads all saved characters directly from the user's Google Flow project (`@Yuna`, `@Ali`, etc.).
-- **Scanned Tag Pills:** Clickable pills (`@Yuna`, `@Ali`) with tooltip: *"Auto mode: added when its name is in the prompt"*.
+#### E. Character Synchronization
+- **Dynamic Character Detection:** Scans saved characters directly from the user's active Google Flow project.
+- **Auto-Population Guard:** Only displays characters that exist in the active Flow project; displays a clean empty state when no characters are present.
 
-#### F. PROMPTS Input & Queue Parser
-- **Label:** `PROMPTS (Count)`
-- **Multiline Textarea:**
-  - One prompt per paragraph (leave one empty line between prompts).
-  - Special `#tag` syntax: Start a prompt with `#name` to name the downloaded file (e.g. `#shot_01 Cinematic shot...`).
-- **`Import .txt`** button.
-- **Queue Range Selector:** `Run [ 1 ] to [ N ]` (allows executing a subset of prompts).
-- **Parsed Prompt Cards List:**
-  - Badge with prompt number (green circular badge `#1`, `#2`, etc.).
-  - Prompt text preview.
-  - Automatic asset tags: e.g. `1 img: DRAGON_VILLAGE`, `@Yuna, @Ali`.
+#### F. Prompt Input & Batch Queue Parser
+- **Multiline Textarea:** Supports paragraphs separated by blank lines with `#tag` naming syntax (e.g., `#shot_01 Cinematic aerial view...`).
+- **Import Tooling:** 1-click `.txt` file importer.
+- **Queue Range Selector:** Customizable `Run [from] to [to]` range selector.
+- **Parsed Prompt Cards:** Live queue cards displaying extracted tags, attached reference images, characters, and voice directives.
 
-#### G. Execution Controls
-- **`Start AutoFlow`** (Large glowing magenta primary button).
-- **`Stop`** button.
-- **`Clear`** button.
-
-#### H. Queue & Live Progress Monitor
-- Status state: `Queued`, `Running`, `Stopped`, `Completed (X/Y prompts)`.
-- Progress bar: Smooth glowing fill tracking percentage.
-- Notification popup: *"Started N prompt(s). Keep the Flow tab open."*
+#### G. Execution Controls & Telemetry
+- **`Start AutoFlow`**: Primary execution trigger.
+- **`Stop`**: Graceful halt after current CDP step.
+- **`Clear`**: Instant prompt queue reset.
+- **Queue Progress Bar**: Real-time progress percentage, active prompt readout, and status states (`Idle`, `Running`, `Completed`).
 
 ---
 
-### 2.4 SETTINGS TAB (Granular Tuning)
+### 2.4 SETTINGS TAB
 
-1. **SPEED & RETRIES:**
-   - **`Prompts at the same time`**: `1`, `2`, `5` (concurrency).
-   - **`Agent outputs per prompt`**: `1`, `2`, `4`.
-   - **`Delay min (sec)`**: e.g. `0`.
-   - **`Delay max (sec)`**: e.g. `20` (randomized jitter delay to prevent rate limits).
-   - **`Max retries`**: e.g. `1` to `3`.
-   - **`Zoom out Flow while running`**: Toggle switch (shrinks canvas view to keep all generation cards in viewport).
+1. **Speed & Retries:**
+   - Concurrency: `1` (Safe Sequential), `2` (Parallel Pro), `5` (Turbo Pro).
+   - Agent outputs per prompt: `1`, `2`, `4`.
+   - Randomized delay jitter (`delayMin` to `delayMax`) to maintain natural pacing.
+   - Max retries on generation error.
+   - Flow canvas zoom optimization (auto-scales canvas to 90% during batch runs).
 
-2. **AUTO DOWNLOAD:**
-   - **`Video quality`**: `720p (fast)`, `1080p (high)`.
-   - **`Image quality`**: `1K (fast)`, `2K`, `4K`.
-   - **`Save to folder`**: Text input (e.g. `aiwalisarkar-flow`).
-   - **`Auto rename files`**: Toggle switch.
-   - **`File naming`**: `Prompt Tag + time code (0-00.png, 0-04.mp4 from #tag)`.
-   - Button: `Open Chrome download settings`.
+2. **Auto Download:**
+   - Video quality: `720p (fast)`, `1080p (high)`.
+   - Image quality: `1K (fast)`, `2K`, `4K`.
+   - Dedicated output subfolder: `asidz-flow/`.
+   - Auto-naming format: `#tag` + timecode or slug.
 
-3. **ADVANCED: CUSTOM SELECTORS:**
-   - JSON override box for DOM selectors in case Google changes the Flow UI:
-     ```json
-     {
-       "promptTextarea": "textarea",
-       "submitButton": "button[type='submit']"
-     }
-     ```
+3. **SaaS Cloud Licensing:**
+   - Backend API URL configuration (defaults to `http://localhost:5050`).
+   - License key activation and instant tier upgrade.
+
+4. **Advanced DOM Overrides:**
+   - Configurable JSON selector map for forward compatibility with Google Flow updates.
 
 ---
 
 ### 2.5 LOGS TAB
-- Real-time logging table showing every prompt sent, CDP attachment, DOM detection, download triggers, and error traces.
+- Live telemetry table capturing timestamps, log levels (`INFO`, `CDP`, `WARN`, `ERROR`), and detailed event descriptions.
+- Export to `.txt` and clear logs tooling.
 
 ---
 
-## 3. Commercial SaaS & Multi-User Architecture
-
-To scale this to thousands of users with free vs. paid tier limits:
+## 3. Commercial SaaS & Multi-Tier Architecture
 
 ```mermaid
 flowchart LR
-    A["Chrome SidePanel UI"] --> B["CDP / chrome.debugger"]
-    B --> C["Google Flow Tab"]
-    A <--> D["Service Worker"]
-    D <-->|Verify License & Consume Quota| E["SaaS Cloud API"]
-    E <--> F[("Postgres / SQLite DB")]
-    E <--> G["Stripe Webhooks"]
+    A["AsidZ SidePanel UI"] --> B["CDP / chrome.debugger"]
+    B --> C["Google Flow Active Canvas"]
+    A <--> D["Background Service Worker"]
+    D <-->|Verify License & Consume Quota| E["AsidZ SaaS API (Port 5050)"]
+    E <--> F[("SQLite Database")]
+    E <--> G["Stripe Webhooks & Billing"]
 ```
 
-### Quota & License Tiers:
+### Quota Tiers:
 - **Free Tier:**
   - 10 generations per day.
-  - 5 prompts max in batch queue.
-  - Standard delay (15s minimum).
+  - 5 prompts maximum per batch queue.
+  - Sequential execution.
 - **Pro Tier ($29/mo):**
-  - Unlimited generations.
-  - 500+ prompts in batch queue.
-  - Parallel generation concurrency (up to 5 prompts at the same time).
-  - Priority retries and CDP hardware speed.
-
----
-
-## 4. Directory Assets in this Project
-
-- **`video-analysis/source_video.mp4`**: Full original video (94MB).
-- **`video-analysis/frames/`**: 124 extracted frames covering every screen, dropdown, modal, and setting.
-- **`AUTOFLOW_MASTER_BLUEPRINT.md`**: This complete technical specification.
+  - Unlimited daily generations.
+  - 500+ prompt batch queues.
+  - Parallel generation concurrency (up to 5 prompts simultaneously).
+  - Priority retry and fast CDP execution.

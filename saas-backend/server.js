@@ -1,5 +1,5 @@
 /**
- * AIWaliSarkar AutoFlow Pro — Commercial SaaS Cloud Backend (`server.js`)
+ * AsidZ AutoFlow Pro — Commercial SaaS Cloud Backend (`server.js`)
  * Zero-dependency Node.js REST API + Built-in SQLite (`node:sqlite`)
  *
  * Features:
@@ -74,7 +74,7 @@ function getTodayDateString() {
     db.prepare(
       `INSERT INTO users (email, password_hash, tier, license_key, created_at)
        VALUES (?, ?, 'PRO', 'PRO-AUTOMA-8888-DEMO', ?)`
-    ).run('pro@aiwalisarkar.com', hashPassword('demo1234'), new Date().toISOString());
+    ).run('pro@asidz.com', hashPassword('demo1234'), new Date().toISOString());
   }
 
   const existingFree = db
@@ -84,7 +84,7 @@ function getTodayDateString() {
     db.prepare(
       `INSERT INTO users (email, password_hash, tier, license_key, created_at)
        VALUES (?, ?, 'FREE', 'FREE-AUTOMA-1111-DEMO', ?)`
-    ).run('free@aiwalisarkar.com', hashPassword('free1234'), new Date().toISOString());
+    ).run('free@asidz.com', hashPassword('free1234'), new Date().toISOString());
   }
 })();
 

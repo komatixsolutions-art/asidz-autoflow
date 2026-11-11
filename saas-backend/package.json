@@ -1,10 +1,10 @@
 {
-  "name": "autoflow-pro-saas-backend",
+  "name": "asidz-autoflow-pro-saas-backend",
   "version": "2.4.0",
-  "description": "Cloud SaaS Licensing, Daily Quota Metering, Auth & Stripe Webhook Server for AIWaliSarkar AutoFlow",
+  "description": "Cloud SaaS Licensing, Daily Quota Metering, Auth & Stripe Webhook Server for AsidZ AutoFlow Pro",
   "main": "server.js",
   "scripts": {
-    "start": "node --experimental-sqlite server.js"
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=22.5.0"
