@@ -207,6 +207,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
 
+        case 'CDP_APPROVAL_ACTIONS_NEEDED': {
+          const tabId = sender?.tab?.id || batchState.targetTabId;
+          const actions = message.payload?.actions || [];
+          if (tabId && actions.length > 0) {
+            await executeHardwareApprovalClicks(tabId, actions);
+          }
+          sendResponse({ ok: true });
+          break;
+        }
+
         default:
           sendResponse({ ok: false, error: 'Unknown message type' });
       }
@@ -576,14 +586,26 @@ async function executeSinglePromptViaCDP(tabId, mode, promptItem, settings) {
   }
 }
 
+async function executeHardwareApprovalClicks(tabId, actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return;
+  await ensureDebuggerAttached(tabId);
+  for (const act of actions) {
+    if (typeof act.x === 'number' && typeof act.y === 'number') {
+      await dispatchTrustedClick(tabId, act.x, act.y);
+      broadcastLog('INFO', `Hardware-clicked Flow permission button "${act.label}" at (${act.x}, ${act.y}).`);
+      await sleep(180);
+    }
+  }
+}
+
 async function checkAndClickFlowApprovalButtons(tabId, approvalPolicy = 'always-approve') {
   try {
     const res = await chrome.tabs.sendMessage(tabId, {
       type: 'CDP_CHECK_APPROVAL_BUTTONS',
       payload: { approvalPolicy }
     });
-    if (res?.clicked?.length > 0) {
-      broadcastLog('INFO', `Auto-clicked permission button(s): ${res.clicked.join(', ')}`);
+    if (Array.isArray(res?.actions) && res.actions.length > 0) {
+      await executeHardwareApprovalClicks(tabId, res.actions);
     }
   } catch (_) {}
 }

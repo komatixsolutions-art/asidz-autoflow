@@ -54,104 +54,141 @@
 
   snapshotExistingMedia();
 
+  function normalizeButtonLabel(rawText) {
+    return String(rawText || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .replace(/^(check_circle|check|close|clear|done|add|refresh|replay|arrow_forward|auto_awesome)\s*/i, '')
+      .trim();
+  }
+
+  function fireFullClickSequence(el) {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const opts = { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1 };
+    try {
+      el.dispatchEvent(new PointerEvent('pointerdown', opts));
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new PointerEvent('pointerup', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
+      el.dispatchEvent(new MouseEvent('click', opts));
+      if (typeof el.click === 'function') el.click();
+    } catch (_) {
+      try {
+        el.click();
+      } catch (__) {}
+    }
+  }
+
   /* ==========================================================================
-     CONTINUOUS AUTO-APPROVAL & PERMISSION HANDLER (Approve / Always Approve / Reject)
+     PRECISION AUTO-APPROVAL & PERMISSION BUTTON DETECTOR
+     Strictly matches ONLY compact buttons (text <= 55 chars, height <= 68px, no child buttons)
+     Never matches parent chat message cards or conversation containers!
      ========================================================================== */
   function scanAndClickApprovalButtons(policyOverride) {
     const policy = policyOverride || currentApprovalPolicy || 'always-approve';
-    const clickedLabels = [];
+    const actions = []; // [{ label, x, y }]
 
     const candidates = Array.from(
-      document.querySelectorAll('button, [role="button"], [role="menuitem"], a.btn, div[tabindex="0"]')
+      document.querySelectorAll('button, [role="button"], a[role="button"], span[role="button"], div[role="button"]')
     );
 
-    const visibleButtons = candidates.filter((btn) => {
+    const compactButtons = candidates.filter((btn) => {
       if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return false;
+      const rawText = (btn.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!rawText || rawText.length > 55) return false;
+
+      const childButtons = btn.querySelectorAll('button, [role="button"]');
+      if (childButtons.length > 0) return false;
+
       const rect = btn.getBoundingClientRect();
-      if (rect.width < 16 || rect.height < 12) return false;
+      if (rect.width < 24 || rect.width > 360 || rect.height < 14 || rect.height > 68) return false;
+
       const style = window.getComputedStyle(btn);
       return style.visibility !== 'hidden' && style.display !== 'none' && parseFloat(style.opacity || '1') > 0.1;
     });
 
+    const recordAndClick = (btn, fallbackLabel) => {
+      const lastClicked = Number(btn.dataset.asidzClickedAt || 0);
+      if (Date.now() - lastClicked < 2500) return false;
+      btn.dataset.asidzClickedAt = String(Date.now());
+
+      const rect = btn.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const cleanLabel = normalizeButtonLabel(btn.textContent) || fallbackLabel;
+
+      fireFullClickSequence(btn);
+      actions.push({ label: cleanLabel, x, y });
+      return true;
+    };
+
     if (policy === 'reject') {
-      for (const btn of visibleButtons) {
-        const text = (btn.textContent || '').trim().toLowerCase();
-        const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
-        if (
-          text === 'reject' ||
-          text === 'decline' ||
-          text === 'deny' ||
-          text.startsWith('reject ') ||
-          aria.includes('reject')
-        ) {
-          if (!btn.dataset.asidzClicked) {
-            btn.dataset.asidzClicked = String(Date.now());
-            btn.click();
-            clickedLabels.push(btn.textContent.trim() || 'Reject');
-          }
+      for (const btn of compactButtons) {
+        const clean = normalizeButtonLabel(btn.textContent);
+        const aria = normalizeButtonLabel(btn.getAttribute('aria-label'));
+        if (clean === 'reject' || clean === 'decline' || clean === 'deny' || aria === 'reject') {
+          recordAndClick(btn, 'Reject');
         }
       }
-      return clickedLabels;
+      return actions;
     }
 
-    // Priority 1: "Always approve in project" / "Always approve" / "Always allow"
+    // Priority 1: "Always approve in project" / "Always approve"
     if (policy === 'always-approve') {
-      for (const btn of visibleButtons) {
-        const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-        const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+      for (const btn of compactButtons) {
+        const clean = normalizeButtonLabel(btn.textContent);
+        const aria = normalizeButtonLabel(btn.getAttribute('aria-label'));
         if (
-          text.includes('always approve') ||
-          text.includes('approve always') ||
-          text.includes('always allow') ||
-          text.includes('approve in project') ||
-          text.includes('approve all') ||
-          aria.includes('always approve') ||
-          aria.includes('approve in project')
+          clean === 'always approve in project' ||
+          clean === 'always approve' ||
+          clean === 'always allow' ||
+          clean.includes('always approve in project') ||
+          aria.includes('always approve')
         ) {
-          if (!btn.dataset.asidzClicked || Date.now() - Number(btn.dataset.asidzClicked) > 3000) {
-            btn.dataset.asidzClicked = String(Date.now());
-            btn.click();
-            clickedLabels.push(btn.textContent.trim() || 'Always approve in project');
-          }
+          recordAndClick(btn, 'Always approve in project');
         }
       }
     }
 
-    // Priority 2: Standard "Approve" / "Allow" / "Confirm" / "Accept"
-    for (const btn of visibleButtons) {
-      const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-      const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+    // Priority 2: Standard "Approve" button
+    for (const btn of compactButtons) {
+      const clean = normalizeButtonLabel(btn.textContent);
+      const aria = normalizeButtonLabel(btn.getAttribute('aria-label'));
       if (
-        text === 'approve' ||
-        text.startsWith('approve ') ||
-        text === 'approve & continue' ||
-        text === 'allow' ||
-        text === 'always allow' ||
-        text === 'confirm' ||
-        text === 'accept' ||
-        aria === 'approve' ||
-        aria.includes('approve generation') ||
-        aria.includes('approve action')
+        clean === 'approve' ||
+        clean === 'approve & continue' ||
+        clean === 'allow' ||
+        clean === 'confirm' ||
+        aria === 'approve'
       ) {
-        if (!btn.dataset.asidzClicked || Date.now() - Number(btn.dataset.asidzClicked) > 3000) {
-          btn.dataset.asidzClicked = String(Date.now());
-          btn.click();
-          clickedLabels.push(btn.textContent.trim() || 'Approve');
+        recordAndClick(btn, 'Approve');
+      }
+    }
+
+    // Priority 3: Click "Try again" if an earlier approval timed out
+    if (actions.length === 0) {
+      for (const btn of compactButtons) {
+        const clean = normalizeButtonLabel(btn.textContent);
+        if (clean === 'try again' || clean === 'retry') {
+          recordAndClick(btn, 'Try again');
         }
       }
     }
 
-    return clickedLabels;
+    return actions;
   }
 
   const approvalObserver = new MutationObserver(() => {
     try {
-      const clicked = scanAndClickApprovalButtons();
-      if (clicked.length > 0) {
+      const actions = scanAndClickApprovalButtons();
+      if (actions.length > 0) {
         chrome.runtime.sendMessage({
-          type: 'CDP_LOG_EVENT',
-          level: 'INFO',
-          message: `Auto-clicked Flow permission button: "${clicked.join(', ')}"`
+          type: 'CDP_APPROVAL_ACTIONS_NEEDED',
+          payload: { actions }
         }).catch(() => {});
       }
     } catch (_) {}
@@ -177,8 +214,8 @@
           if (message.payload?.approvalPolicy) {
             currentApprovalPolicy = message.payload.approvalPolicy;
           }
-          const clicked = scanAndClickApprovalButtons(currentApprovalPolicy);
-          sendResponse({ ok: true, clicked });
+          const actions = scanAndClickApprovalButtons(currentApprovalPolicy);
+          sendResponse({ ok: true, actions });
         }
       } catch (err) {
         sendResponse({ ok: false, error: err.message });
@@ -578,35 +615,82 @@
   }
 
   /**
-   * Applies model setting (Nano Banana 2.1 vs Veo) in Google Flow's bottom creation dock.
+   * Applies model setting (Nano Banana 2.1 vs Veo / Omni) AND ensures the "Agent" toggle
+   * is OFF during direct image/video modes (so Flow generates directly without asking chat confirmation),
+   * or ON when mode === 'agent-automation'.
    */
   async function applyModelSettingInBottomDock(mode, settings) {
     const isImageMode = mode === 'text-to-image' || mode === 'image-to-image';
     const targetModelKeyword = isImageMode ? 'Nano Banana' : 'Veo';
-    const minTop = window.innerHeight * 0.6;
+    const minTop = window.innerHeight * 0.58;
 
-    const buttons = Array.from(document.querySelectorAll('button, div[role="button"]')).filter((b) => {
+    const dockButtons = Array.from(document.querySelectorAll('button, div[role="button"]')).filter((b) => {
       const r = b.getBoundingClientRect();
-      return r.top >= minTop;
+      return r.top >= minTop && r.height <= 60;
     });
 
-    const modelPill = buttons.find((b) => {
+    const agentBtn = dockButtons.find((b) => normalizeButtonLabel(b.textContent) === 'agent');
+    if (agentBtn) {
+      const isAgentActive =
+        agentBtn.getAttribute('aria-pressed') === 'true' ||
+        agentBtn.getAttribute('data-state') === 'on' ||
+        agentBtn.classList.contains('active') ||
+        agentBtn.classList.contains('selected');
+
+      if (mode === 'agent-automation' && !isAgentActive) {
+        fireFullClickSequence(agentBtn);
+        await sleep(200);
+      } else if (mode !== 'agent-automation' && isAgentActive) {
+        fireFullClickSequence(agentBtn);
+        await sleep(200);
+      }
+    }
+
+    const modelPill = dockButtons.find((b) => {
       const text = (b.textContent || '').trim();
-      return text.includes('Nano Banana') || text.includes('Veo') || text.includes('Omni') || text.includes('Flash');
+      return (
+        text.includes('Nano Banana') ||
+        text.includes('Veo') ||
+        text.includes('Omni') ||
+        text.includes('Flash') ||
+        text.includes('Video') ||
+        text.includes('Image')
+      );
     });
 
     if (modelPill) {
       const currentText = (modelPill.textContent || '').trim();
-      if (!currentText.includes(targetModelKeyword)) {
-        modelPill.click();
-        await new Promise((r) => setTimeout(r, 220));
+      const needsSwitch = isImageMode
+        ? !currentText.includes('Nano Banana') && !currentText.includes('Image')
+        : currentText.includes('Nano Banana') || currentText.includes('Image');
 
-        const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], li, button'));
-        const match = menuItems.find((item) => (item.textContent || '').includes(targetModelKeyword));
-        if (match) {
-          match.click();
-          await new Promise((r) => setTimeout(r, 150));
+      if (needsSwitch) {
+        fireFullClickSequence(modelPill);
+        await sleep(280);
+
+        const tabTarget = isImageMode ? 'image' : 'video';
+        const modeTab = Array.from(document.querySelectorAll('button, div[role="button"], [role="tab"]')).find((el) => {
+          const t = normalizeButtonLabel(el.textContent);
+          const r = el.getBoundingClientRect();
+          return t === tabTarget && r.top > window.innerHeight * 0.35;
+        });
+        if (modeTab) {
+          fireFullClickSequence(modeTab);
+          await sleep(200);
         }
+
+        const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], li, button, div[role="button"]'));
+        const match = menuItems.find((item) => {
+          const r = item.getBoundingClientRect();
+          return r.top > window.innerHeight * 0.35 && (item.textContent || '').includes(targetModelKeyword);
+        });
+        if (match) {
+          fireFullClickSequence(match);
+          await sleep(180);
+        }
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+        await sleep(120);
       }
     }
   }
@@ -677,12 +761,11 @@
 
     return new Promise((resolve) => {
       const checkInterval = setInterval(() => {
-        const clickedApprovals = scanAndClickApprovalButtons(currentApprovalPolicy);
-        if (clickedApprovals.length > 0) {
+        const actions = scanAndClickApprovalButtons(currentApprovalPolicy);
+        if (actions.length > 0) {
           chrome.runtime.sendMessage({
-            type: 'CDP_LOG_EVENT',
-            level: 'INFO',
-            message: `Auto-clicked "${clickedApprovals.join(', ')}" during generation.`
+            type: 'CDP_APPROVAL_ACTIONS_NEEDED',
+            payload: { actions }
           }).catch(() => {});
         }
 
