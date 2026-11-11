@@ -3,11 +3,12 @@
  * Injected into https://flow.google.com/* and https://labs.google/fx/tools/flow*
  *
  * Responsibilities:
- * 1. Accurately identifies Google Flow's active canvas prompt dock at the bottom of the screen.
+ * 1. Accurately identifies Google Flow's bottom creation dock (strictly y > window.innerHeight * 0.65).
  * 2. Injects batch prompts bypassing React synthetic event barriers using native prototype setters.
- * 3. Applies generation options (Model: Nano Banana / Veo, Aspect Ratio, Outputs).
- * 4. Dispatches hardware clicks & keystrokes on the generate arrow button.
- * 5. Watches for newly created generation cards on the canvas and triggers downloads
+ * 3. Applies generation options (Model: Nano Banana 2.1 for images, Veo for videos).
+ * 4. Dispatches hardware clicks & keystrokes on the bottom generate arrow button (NEVER sidebar/header).
+ * 5. Deep-scans characters from Google Flow's Characters sidebar, drawer, and @-mention popup.
+ * 6. Watches for newly created generation cards on the canvas and triggers downloads
  *    strictly for high-resolution project outputs (filtering out UI icons, avatars, and old media).
  */
 
@@ -15,7 +16,6 @@
   if (window.__ASIDZ_CDP_AUTOMATOR_LOADED__) return;
   window.__ASIDZ_CDP_AUTOMATOR_LOADED__ = true;
 
-  // Snapshot of pre-existing media to ensure we only download newly generated project files
   const baselineMediaUrls = new Set();
 
   function snapshotExistingMedia() {
@@ -25,7 +25,6 @@
     });
   }
 
-  // Initial snapshot on load
   snapshotExistingMedia();
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -37,6 +36,9 @@
         } else if (message.type === 'CDP_POLL_FOR_NEW_MEDIA') {
           const mediaResult = await pollForNewMedia(message.payload);
           sendResponse(mediaResult);
+        } else if (message.type === 'SCAN_CHARACTERS_IN_PAGE') {
+          const chars = await deepScanCharacters();
+          sendResponse({ ok: true, characters: chars });
         }
       } catch (err) {
         sendResponse({ ok: false, error: err.message });
@@ -46,41 +48,104 @@
   });
 
   /**
+   * Deep-scans characters from Google Flow:
+   * 1. Inspects active canvas chips and data attributes.
+   * 2. Inspects the Characters drawer / sidebar.
+   * 3. Temporarily types '@' into the prompt bar to read Flow's autocomplete list.
+   */
+  async function deepScanCharacters() {
+    const found = new Set();
+
+    // 1. Scan any rendered character elements or pills in canvas / sidebars
+    document.querySelectorAll('[data-character-name], [data-testid*="character"], .character-card, .character-item').forEach((el) => {
+      const name = el.getAttribute('data-character-name') || el.textContent;
+      if (name) {
+        const clean = name.trim().replace(/^@/, '');
+        if (clean && clean.length <= 25) found.add(`@${clean}`);
+      }
+    });
+
+    // 2. Scan text nodes containing @Name
+    document.querySelectorAll('span, p, div, button').forEach((el) => {
+      if (el.children.length === 0) {
+        const txt = (el.textContent || '').trim();
+        const matches = txt.match(/@[A-Za-z0-9_]{2,24}/g);
+        if (matches) {
+          matches.forEach((m) => found.add(m));
+        }
+      }
+    });
+
+    // 3. Inspect the left sidebar Characters tab
+    const sidebarButtons = Array.from(document.querySelectorAll('button, div[role="button"], a, span'));
+    const charTabBtn = sidebarButtons.find((el) => {
+      const t = (el.textContent || '').trim().toLowerCase();
+      const rect = el.getBoundingClientRect();
+      return (t === 'characters' || t.includes('character')) && rect.left < 260 && rect.top < 380;
+    });
+
+    if (charTabBtn && found.size === 0) {
+      // Temporarily open Characters panel to read names
+      charTabBtn.click();
+      await new Promise((r) => setTimeout(r, 400));
+      document.querySelectorAll('h3, h4, span, div').forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.left < 360 && rect.width > 20 && rect.height > 12) {
+          const t = (el.textContent || '').trim();
+          if (t && /^[A-Za-z0-9_-]{2,20}$/.test(t) && !['characters', 'scenes', 'library', 'tools', 'media', 'create', 'all'].includes(t.toLowerCase())) {
+            found.add(`@${t}`);
+          }
+        }
+      });
+    }
+
+    // 4. Try @-mention autocomplete in prompt bar if still empty
+    if (found.size === 0) {
+      const input = findFlowBottomPromptInput();
+      if (input) {
+        input.focus();
+        setReactControlledValue(input, '@');
+        await new Promise((r) => setTimeout(r, 450));
+        document.querySelectorAll('[role="listbox"] [role="option"], [role="menu"] [role="menuitem"], .mention-item').forEach((opt) => {
+          const t = (opt.textContent || '').trim().replace(/^@/, '');
+          if (t) found.add(`@${t}`);
+        });
+        setReactControlledValue(input, '');
+      }
+    }
+
+    return Array.from(found);
+  }
+
+  /**
    * Prepares the Google Flow canvas for prompt generation:
-   * 1. Takes a fresh snapshot of all existing media before clicking generate.
-   * 2. Locates the bottom prompt input bar ("What do you want to create?").
-   * 3. Selects the target model (Nano Banana / Veo) in Flow's bottom bar.
-   * 4. Injects reference assets & characters.
-   * 5. Sets the prompt text into React controlled state.
-   * 6. Returns exact coordinates for CDP hardware-level click & enter dispatch.
+   * 1. Takes a fresh snapshot of existing media.
+   * 2. Locates the bottom prompt dock (strictly y > window.innerHeight * 0.65).
+   * 3. Sets target model (Nano Banana 2.1 for image, Veo for video).
+   * 4. Injects reference assets.
+   * 5. Sets prompt text via React prototype setters.
+   * 6. Returns exact coordinates of bottom dock arrow button.
    */
   async function preparePromptStep({ mode, promptItem, settings }) {
-    // 1. Snapshot existing media right before submitting
     snapshotExistingMedia();
 
-    // 2. Locate the prompt input element in Google Flow
-    const inputEl = findFlowPromptInput();
+    const inputEl = findFlowBottomPromptInput();
     if (!inputEl) {
       return {
         ok: false,
-        error: 'Google Flow prompt bar not found. Make sure you have opened a project canvas on flow.google.com.'
+        error: 'Google Flow prompt bar not found at the bottom of the screen. Make sure you are inside an active Flow project canvas.'
       };
     }
 
-    // 3. Ensure target model (Nano Banana for Text-to-Image vs Veo for Video) is selected in Flow
-    await applyModelSettingInFlow(mode, settings);
+    // Apply model setting in bottom dock
+    await applyModelSettingInBottomDock(mode, settings);
 
-    // 4. Attach reference images if present
+    // Attach reference images if present
     if (Array.isArray(promptItem.matchedImages) && promptItem.matchedImages.length > 0) {
       await attachReferenceImages(promptItem.matchedImages);
     }
 
-    // 5. Select @character chips if present in prompt
-    if (Array.isArray(promptItem.matchedCharacters) && promptItem.matchedCharacters.length > 0) {
-      activateCharacterChips(promptItem.matchedCharacters);
-    }
-
-    // 6. Focus and compose prompt text
+    // Focus bottom prompt input
     inputEl.scrollIntoView({ behavior: 'instant', block: 'center' });
     inputEl.focus();
 
@@ -89,7 +154,7 @@
       composedPrompt += ` [Voice: ${promptItem.matchedVoices.join(', ')}]`;
     }
 
-    // Set React controlled value so Google Flow detects the change
+    // Set React controlled value
     setReactControlledValue(inputEl, composedPrompt);
 
     const inputRect = inputEl.getBoundingClientRect();
@@ -98,23 +163,29 @@
       y: inputRect.top + inputRect.height / 2
     };
 
-    // 7. Find the right-arrow submit button inside the prompt bar
-    const submitBtn = findFlowSubmitButton(inputEl);
+    // Locate the Submit Arrow Button strictly inside the bottom creation dock
+    const submitBtn = findFlowBottomSubmitButton(inputEl);
     let submitCoords = null;
+
     if (submitBtn) {
-      submitBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
       const submitRect = submitBtn.getBoundingClientRect();
       submitCoords = {
         x: submitRect.left + submitRect.width / 2,
         y: submitRect.top + submitRect.height / 2
       };
 
-      // Also trigger in-page click as immediate backup
+      // In-page click backup
       setTimeout(() => {
         try {
           submitBtn.click();
         } catch (_) {}
-      }, 350);
+      }, 300);
+    } else {
+      // Fallback coordinate: right end of bottom prompt bar
+      submitCoords = {
+        x: inputRect.right - 24,
+        y: inputRect.top + inputRect.height / 2
+      };
     }
 
     return {
@@ -127,81 +198,101 @@
   }
 
   /**
-   * Robust locator for Google Flow's prompt input element.
-   * Matches Flow's bottom creation dock across different UI versions.
+   * Strictly locates Google Flow's prompt input in the BOTTOM DOCK (y > window.innerHeight * 0.65).
+   * Never selects header or sidebar search boxes.
    */
-  function findFlowPromptInput() {
-    // 1. Check for inputs with "create" or "prompt" in placeholder
-    const placeholderCandidates = Array.from(
+  function findFlowBottomPromptInput() {
+    const minTop = window.innerHeight * 0.6; // Must be in the lower 40% of the screen
+
+    // 1. Check elements with placeholder "What do you want to create?"
+    const candidates = Array.from(
       document.querySelectorAll(
         "textarea, input[placeholder*='create' i], input[placeholder*='prompt' i], [contenteditable='true'], [role='textbox']"
       )
     );
 
-    const visibleInput = placeholderCandidates.find((el) => {
+    const bottomInput = candidates.find((el) => {
       const rect = el.getBoundingClientRect();
       return (
-        rect.width > 50 &&
-        rect.height > 20 &&
+        rect.top >= minTop &&
+        rect.width > 60 &&
+        rect.height > 18 &&
         window.getComputedStyle(el).visibility !== 'hidden' &&
         window.getComputedStyle(el).display !== 'none'
       );
     });
 
-    if (visibleInput) return visibleInput;
+    if (bottomInput) return bottomInput;
 
-    // 2. Check for bottom dock / form container
-    const bottomDock = document.querySelector("form, [role='region'], div[class*='prompt'], footer");
-    if (bottomDock) {
-      const dockInput = bottomDock.querySelector('textarea, input, [contenteditable="true"]');
-      if (dockInput) return dockInput;
+    // 2. Check for container positioned at the bottom
+    const allContainers = Array.from(document.querySelectorAll('form, div, [role="region"], footer'));
+    for (const cont of allContainers) {
+      const r = cont.getBoundingClientRect();
+      if (r.top >= minTop && r.height < 250 && r.width > 200) {
+        const inp = cont.querySelector('textarea, input, [contenteditable="true"]');
+        if (inp) return inp;
+      }
     }
 
     return null;
   }
 
   /**
-   * Locates Google Flow's Submit / Generate button (the circular arrow button on the right).
+   * Strictly locates the Generate Arrow Button in the BOTTOM DOCK (y > window.innerHeight * 0.65).
+   * NEVER clicks "+ Create new project" or sidebar buttons in the top half of the screen.
    */
-  function findFlowSubmitButton(inputEl) {
-    // Search within the input's parent container
-    const container = inputEl.closest('form, div[class*="prompt"], [role="region"], div[style*="fixed"], div');
+  function findFlowBottomSubmitButton(inputEl) {
+    const minTop = window.innerHeight * 0.6;
+
+    // Search inside the prompt input's parent dock container
+    const container =
+      inputEl.closest('form, div[class*="prompt"], [role="region"]') ||
+      inputEl.parentElement?.parentElement ||
+      inputEl.parentElement;
+
     if (container) {
-      // Find button with SVG arrow icon or generate aria-label
-      const buttons = Array.from(container.querySelectorAll('button'));
-      const arrowBtn = buttons.find((btn) => {
+      const buttons = Array.from(container.querySelectorAll('button, div[role="button"]'));
+      // Find button on the right side of the dock (x > inputRect.left + 50)
+      const inputRect = inputEl.getBoundingClientRect();
+      const rightBtns = buttons.filter((btn) => {
+        const r = btn.getBoundingClientRect();
+        return r.top >= minTop && r.left > inputRect.left + 40 && !btn.disabled;
+      });
+
+      // Prefer button with SVG arrow icon or generate aria-label
+      const arrowBtn = rightBtns.find((btn) => {
         const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
         const hasSvg = btn.querySelector('svg') !== null;
-        return (
-          aria.includes('generate') ||
-          aria.includes('submit') ||
-          aria.includes('create') ||
-          aria.includes('send') ||
-          hasSvg
-        );
+        return hasSvg || aria.includes('generate') || aria.includes('submit') || aria.includes('send') || aria.includes('arrow');
       });
+
       if (arrowBtn) return arrowBtn;
-      if (buttons.length > 0) return buttons[buttons.length - 1];
+      if (rightBtns.length > 0) return rightBtns[rightBtns.length - 1];
     }
 
-    // Fallback: global search for generate buttons
-    const globalBtns = Array.from(
-      document.querySelectorAll(
-        "button[aria-label*='generate' i], button[aria-label*='create' i], button[type='submit']"
-      )
-    );
-    return globalBtns.find((b) => !b.disabled && b.getBoundingClientRect().width > 16) || null;
+    // Global fallback ONLY in bottom region
+    const bottomBtns = Array.from(document.querySelectorAll('button')).filter((b) => {
+      const r = b.getBoundingClientRect();
+      return r.top >= minTop && r.left > window.innerWidth * 0.4 && !b.disabled;
+    });
+
+    const bottomArrow = bottomBtns.find((b) => b.querySelector('svg') !== null || /generate|submit|send/i.test(b.getAttribute('aria-label') || ''));
+    return bottomArrow || bottomBtns[bottomBtns.length - 1] || null;
   }
 
   /**
-   * Selects target model (e.g. Nano Banana 2.1 for image, Veo for video) in Flow's bottom bar.
+   * Applies model setting (Nano Banana 2.1 vs Veo) in Google Flow's bottom creation dock.
    */
-  async function applyModelSettingInFlow(mode, settings) {
+  async function applyModelSettingInBottomDock(mode, settings) {
     const isImageMode = mode === 'text-to-image' || mode === 'image-to-image';
     const targetModelKeyword = isImageMode ? 'Nano Banana' : 'Veo';
+    const minTop = window.innerHeight * 0.6;
 
-    // Find model pill button in Google Flow's prompt bar
-    const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+    const buttons = Array.from(document.querySelectorAll('button, div[role="button"]')).filter((b) => {
+      const r = b.getBoundingClientRect();
+      return r.top >= minTop;
+    });
+
     const modelPill = buttons.find((b) => {
       const text = (b.textContent || '').trim();
       return text.includes('Nano Banana') || text.includes('Veo') || text.includes('Omni') || text.includes('Flash');
@@ -211,9 +302,8 @@
       const currentText = (modelPill.textContent || '').trim();
       if (!currentText.includes(targetModelKeyword)) {
         modelPill.click();
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 220));
 
-        // In dropdown menu, click the matching model option
         const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], li, button'));
         const match = menuItems.find((item) => (item.textContent || '').includes(targetModelKeyword));
         if (match) {
@@ -277,25 +367,16 @@
     }
   }
 
-  function activateCharacterChips(charTags) {
-    const candidates = Array.from(document.querySelectorAll('[data-character-name], .character-chip, button, span'));
-    for (const tag of charTags) {
-      const match = candidates.find((el) => (el.textContent || '').trim().toLowerCase() === tag.toLowerCase());
-      if (match) match.click();
-    }
-  }
-
   /**
    * Polls Google Flow's canvas for the newly generated output media.
    * Filters out all avatars, UI icons, Google logos, and files that were in the baseline snapshot.
    */
-  function pollForNewMedia({ mode, promptTag, timeoutMs = 25000 }) {
+  function pollForNewMedia({ mode, promptTag, timeoutMs = 28000 }) {
     const isImageMode = mode === 'text-to-image' || mode === 'image-to-image';
     const startTime = Date.now();
 
     return new Promise((resolve) => {
       const checkInterval = setInterval(() => {
-        // Look for videos or images on the Google Flow canvas
         const selector = isImageMode ? 'img[src]' : 'video[src], video source[src]';
         const elements = Array.from(document.querySelectorAll(selector));
 
@@ -311,6 +392,7 @@
             lower.includes('logo') ||
             lower.includes('favicon') ||
             lower.includes('asset') ||
+            lower.includes('profile') ||
             src.startsWith('data:image/svg')
           ) {
             continue;
@@ -321,7 +403,6 @@
             continue;
           }
 
-          // Found a legitimate newly generated output!
           baselineMediaUrls.add(src);
           clearInterval(checkInterval);
 

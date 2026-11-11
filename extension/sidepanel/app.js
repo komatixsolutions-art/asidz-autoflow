@@ -106,6 +106,8 @@ const els = {
   autoCharacterToggle: document.getElementById('autoCharacterToggle'),
   scanCharactersBtn: document.getElementById('scanCharactersBtn'),
   characterPillsContainer: document.getElementById('characterPillsContainer'),
+  manualCharInput: document.getElementById('manualCharInput'),
+  addManualCharBtn: document.getElementById('addManualCharBtn'),
 
   // Prompts block
   promptTotalCount: document.getElementById('promptTotalCount'),
@@ -489,7 +491,7 @@ function renderCharacterPills() {
     const hint = document.createElement('span');
     hint.className = 'helper-note';
     hint.id = 'noCharHint';
-    hint.textContent = 'No characters scanned yet. Click "Scan characters from Flow" when your Flow project has saved characters.';
+    hint.textContent = 'No characters added or scanned yet. Type a name above or click "Scan characters from Flow".';
     els.characterPillsContainer.appendChild(hint);
     return;
   }
@@ -499,16 +501,55 @@ function renderCharacterPills() {
     pill.className = 'char-pill';
     pill.dataset.char = charTag;
     pill.title = 'Auto mode: added when its name is in the prompt. Click to insert.';
-    pill.textContent = charTag;
-    pill.addEventListener('click', () => {
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = charTag;
+    textSpan.addEventListener('click', () => {
       const start = els.promptsTextarea.selectionStart || els.promptsTextarea.value.length;
       const before = els.promptsTextarea.value.slice(0, start);
       const after = els.promptsTextarea.value.slice(start);
       els.promptsTextarea.value = `${before}${charTag} ${after}`;
       parseAndRenderPrompts();
     });
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'char-pill-del';
+    delBtn.textContent = '×';
+    delBtn.title = `Remove ${charTag}`;
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      state.scannedCharacters = state.scannedCharacters.filter((c) => c !== charTag);
+      if (chrome?.storage?.local) {
+        await chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
+      }
+      renderCharacterPills();
+      parseAndRenderPrompts();
+      addLog('INFO', `Removed character: ${charTag}`);
+    });
+
+    pill.appendChild(textSpan);
+    pill.appendChild(delBtn);
     els.characterPillsContainer.appendChild(pill);
   });
+}
+
+function handleAddManualCharacter() {
+  const val = (els.manualCharInput?.value || '').trim();
+  if (!val) return;
+  const cleanName = val.replace(/^@+/, '').replace(/\s+/g, '_');
+  if (!cleanName) return;
+  const tag = `@${cleanName}`;
+  if (!state.scannedCharacters.includes(tag)) {
+    state.scannedCharacters.push(tag);
+    if (chrome?.storage?.local) {
+      chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
+    }
+    renderCharacterPills();
+    parseAndRenderPrompts();
+    showToast(`Added character ${tag}`);
+    addLog('INFO', `Added character: ${tag}`);
+  }
+  if (els.manualCharInput) els.manualCharInput.value = '';
 }
 
 async function scanCharactersFromFlow() {
@@ -794,6 +835,13 @@ function bindEvents() {
   // Scan characters & voices
   els.scanCharactersBtn.addEventListener('click', scanCharactersFromFlow);
   els.syncVoicesBtn.addEventListener('click', syncVoicesFromFlow);
+  els.addManualCharBtn?.addEventListener('click', handleAddManualCharacter);
+  els.manualCharInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddManualCharacter();
+    }
+  });
 
   // Start / Stop / Clear
   els.startAutoFlowBtn.addEventListener('click', startBatchAutoFlow);

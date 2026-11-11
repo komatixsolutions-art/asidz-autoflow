@@ -137,17 +137,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'Google Flow tab not found.' });
             return;
           }
-          const chars = await evaluateInFlowTab(
-            tab.id,
-            `(() => {
-              const found = new Set();
-              document.querySelectorAll('[data-character-name], .character-chip, button, span').forEach(el => {
-                const txt = (el.textContent || '').trim();
-                if (/^@[A-Za-z0-9_]{2,20}$/.test(txt)) found.add(txt);
+          let chars = [];
+          try {
+            const pageScan = await chrome.tabs.sendMessage(tab.id, { type: 'SCAN_CHARACTERS_IN_PAGE' });
+            if (pageScan?.ok && Array.isArray(pageScan.characters)) {
+              chars = pageScan.characters;
+            }
+          } catch (_) {
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['scripts/cdp-automator.js']
               });
-              return Array.from(found);
-            })()`
-          );
+              await sleep(200);
+              const retry = await chrome.tabs.sendMessage(tab.id, { type: 'SCAN_CHARACTERS_IN_PAGE' });
+              if (retry?.ok && Array.isArray(retry.characters)) {
+                chars = retry.characters;
+              }
+            } catch (e) {
+              chars = [];
+            }
+          }
           sendResponse({ ok: true, characters: chars || [] });
           break;
         }
@@ -223,19 +233,28 @@ async function ensureDebuggerAttached(tabId) {
   if (batchState.debuggerAttached && batchState.targetTabId === tabId) {
     return true;
   }
+  // Cleanly detach any lingering or previous session first
+  try {
+    await chrome.debugger.detach({ tabId });
+    await sleep(150);
+  } catch (_) {}
+
   try {
     await chrome.debugger.attach({ tabId }, DEBUGGER_PROTOCOL_VERSION);
   } catch (err) {
-    if (!String(err.message).includes('Already attached')) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (!msg.includes('already attached')) {
       throw err;
     }
   }
   batchState.targetTabId = tabId;
   batchState.debuggerAttached = true;
 
-  await sendCDP(tabId, 'DOM.enable', {});
-  await sendCDP(tabId, 'Runtime.enable', {});
-  await sendCDP(tabId, 'Page.enable', {});
+  try {
+    await sendCDP(tabId, 'DOM.enable', {});
+    await sendCDP(tabId, 'Runtime.enable', {});
+    await sendCDP(tabId, 'Page.enable', {});
+  } catch (_) {}
   broadcastLog('CDP', `Attached chrome.debugger (CDP ${DEBUGGER_PROTOCOL_VERSION}) to Tab #${tabId}`);
   return true;
 }
