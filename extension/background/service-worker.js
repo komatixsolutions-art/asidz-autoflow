@@ -560,16 +560,32 @@ async function executeSinglePromptViaCDP(tabId, mode, promptItem, settings) {
   // 3. Dispatch hardware click on the right-arrow submit button, or dispatch Enter key
   if (prep.submitCoords) {
     await dispatchTrustedClick(tabId, prep.submitCoords.x, prep.submitCoords.y);
-    // Also trigger Enter key as reliable backup
     await dispatchEnterKey(tabId);
+    // Check and auto-click any immediate "Always approve in project" / "Approve" / "Reject" dialog
+    await sleep(600);
+    await checkAndClickFlowApprovalButtons(tabId, settings?.approvalPolicy);
     return {
       ok: true,
       detail: `CDP hardware click at (${Math.round(prep.submitCoords.x)}, ${Math.round(prep.submitCoords.y)}) + Enter keystroke`
     };
   } else {
     await dispatchEnterKey(tabId);
+    await sleep(600);
+    await checkAndClickFlowApprovalButtons(tabId, settings?.approvalPolicy);
     return { ok: true, detail: 'CDP Enter keystroke dispatched' };
   }
+}
+
+async function checkAndClickFlowApprovalButtons(tabId, approvalPolicy = 'always-approve') {
+  try {
+    const res = await chrome.tabs.sendMessage(tabId, {
+      type: 'CDP_CHECK_APPROVAL_BUTTONS',
+      payload: { approvalPolicy }
+    });
+    if (res?.clicked?.length > 0) {
+      broadcastLog('INFO', `Auto-clicked permission button(s): ${res.clicked.join(', ')}`);
+    }
+  } catch (_) {}
 }
 
 async function waitForGenerationAndDownload(tabId, mode, promptItem, settings) {
@@ -579,7 +595,8 @@ async function waitForGenerationAndDownload(tabId, mode, promptItem, settings) {
       payload: {
         mode,
         promptTag: promptItem.tag,
-        timeoutMs: 30000 // Allow up to 30s for Flow generation to finish
+        approvalPolicy: settings?.approvalPolicy || 'always-approve',
+        timeoutMs: 45000 // Allow up to 45s for Flow generation + approvals to finish
       }
     });
     if (pollRes?.mediaUrl) {

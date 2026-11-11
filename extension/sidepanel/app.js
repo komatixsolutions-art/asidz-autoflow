@@ -52,6 +52,7 @@ const state = {
     delayMax: 20,
     maxRetries: 1,
     zoomOutFlow: true,
+    approvalPolicy: 'always-approve',
     videoQuality: '720p',
     imageQuality: '1K',
     saveFolder: 'asidz-flow',
@@ -135,6 +136,7 @@ const els = {
   delayMaxInput: document.getElementById('delayMaxInput'),
   maxRetriesInput: document.getElementById('maxRetriesInput'),
   zoomOutFlowToggle: document.getElementById('zoomOutFlowToggle'),
+  approvalPolicySelect: document.getElementById('approvalPolicySelect'),
   videoQualitySelect: document.getElementById('videoQualitySelect'),
   imageQualitySelect: document.getElementById('imageQualitySelect'),
   saveFolderInput: document.getElementById('saveFolderInput'),
@@ -172,9 +174,14 @@ async function init() {
   renderThumbnails();
   updateModeUI(state.mode);
   parseAndRenderPrompts();
-  checkGoogleFlowTabConnection();
+  await checkGoogleFlowTabConnection();
   syncLicenseStatus();
   addLog('INFO', 'AsidZ AutoFlow Side Panel initialized.');
+
+  // Auto-scan project characters on load if connected to Google Flow
+  if (state.isFlowConnected && state.scannedCharacters.length === 0) {
+    setTimeout(() => scanCharactersFromFlow(true), 600);
+  }
 
   // Load clean creative prompts if textarea is empty (No hardcoded sample characters)
   if (!els.promptsTextarea.value.trim()) {
@@ -200,7 +207,11 @@ async function loadSavedState() {
     state.uploadedImages = data.autoflowImages;
   }
   if (Array.isArray(data.autoflowCharacters)) {
-    state.scannedCharacters = data.autoflowCharacters;
+    const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+    state.scannedCharacters = data.autoflowCharacters.filter((c) => {
+      const bare = String(c || '').replace(/^@+/, '').toLowerCase();
+      return bare.length >= 2 && !blocked.has(bare);
+    });
   }
   applySettingsToDOM();
   renderQuotaUI();
@@ -223,6 +234,7 @@ function applySettingsToDOM() {
   els.delayMaxInput.value = s.delayMax;
   els.maxRetriesInput.value = s.maxRetries;
   els.zoomOutFlowToggle.checked = Boolean(s.zoomOutFlow);
+  if (els.approvalPolicySelect) els.approvalPolicySelect.value = s.approvalPolicy || 'always-approve';
   els.videoQualitySelect.value = s.videoQuality;
   els.imageQualitySelect.value = s.imageQuality;
   els.saveFolderInput.value = s.saveFolder || 'asidz-flow';
@@ -259,6 +271,7 @@ async function persistSettings() {
     delayMax: Math.max(1, parseInt(els.delayMaxInput.value, 10) || 20),
     maxRetries: Math.max(0, parseInt(els.maxRetriesInput.value, 10) || 1),
     zoomOutFlow: els.zoomOutFlowToggle.checked,
+    approvalPolicy: els.approvalPolicySelect ? els.approvalPolicySelect.value : 'always-approve',
     videoQuality: els.videoQualitySelect.value,
     imageQuality: els.imageQualitySelect.value,
     saveFolder: els.saveFolderInput.value.trim() || 'asidz-flow',
@@ -313,10 +326,13 @@ function parseAndRenderPrompts() {
     const matchedCharacters = [];
     if (autoChar && state.scannedCharacters.length > 0) {
       for (const charTag of state.scannedCharacters) {
-        const bareName = charTag.replace(/^@/, '');
+        const bareName = charTag.replace(/^@+/, '');
         const regex = new RegExp(`(@?\\b${bareName}\\b)`, 'i');
         if (regex.test(cleanPrompt)) {
           matchedCharacters.push(charTag);
+          // Automatically tag the character name with @ in the cleanPrompt if not already prefixed
+          const replaceRegex = new RegExp(`(?<!@)\\b${bareName}\\b`, 'gi');
+          cleanPrompt = cleanPrompt.replace(replaceRegex, `@${bareName}`);
         }
       }
     }
@@ -552,25 +568,34 @@ function handleAddManualCharacter() {
   if (els.manualCharInput) els.manualCharInput.value = '';
 }
 
-async function scanCharactersFromFlow() {
-  addLog('CDP', 'Scanning characters from active Google Flow project canvas...');
+async function scanCharactersFromFlow(silent = false) {
+  if (!silent) addLog('CDP', 'Scanning characters from active Google Flow project canvas...');
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'SCAN_FLOW_CHARACTERS' });
     if (resp?.ok && Array.isArray(resp.characters) && resp.characters.length > 0) {
-      state.scannedCharacters = Array.from(new Set([...state.scannedCharacters, ...resp.characters]));
-      if (chrome?.storage?.local) {
-        await chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
+      const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+      const validChars = resp.characters.filter((c) => {
+        const bare = String(c || '').replace(/^@+/, '').toLowerCase();
+        return bare.length >= 2 && !blocked.has(bare);
+      });
+      if (validChars.length > 0) {
+        state.scannedCharacters = Array.from(new Set([...state.scannedCharacters, ...validChars]));
+        if (chrome?.storage?.local) {
+          await chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
+        }
+        renderCharacterPills();
+        parseAndRenderPrompts();
+        if (!silent) showToast(`Scanned ${validChars.length} character(s) from Google Flow.`);
+        addLog('INFO', `Characters synced: ${state.scannedCharacters.join(', ')}`);
+        return;
       }
-      renderCharacterPills();
-      parseAndRenderPrompts();
-      showToast(`Scanned ${resp.characters.length} character(s) from Google Flow.`);
-      addLog('INFO', `Characters synced: ${state.scannedCharacters.join(', ')}`);
-    } else {
-      showToast('No characters detected in current Flow project. Add characters in Flow first.');
+    }
+    if (!silent) {
+      showToast('No characters detected in current Flow project. Open your Flow project or add manually.');
       addLog('WARN', resp?.error || 'No character chips found in Flow canvas.');
     }
   } catch (err) {
-    addLog('ERROR', `Character scan error: ${err.message}`);
+    if (!silent) addLog('ERROR', `Character scan error: ${err.message}`);
   }
 }
 
@@ -655,6 +680,9 @@ function renderQuotaUI() {
    ========================================================================== */
 async function startBatchAutoFlow() {
   await persistSettings();
+  if (state.settings.autoCharacter && state.scannedCharacters.length === 0) {
+    await scanCharactersFromFlow(true);
+  }
   parseAndRenderPrompts();
 
   if (state.parsedPrompts.length === 0) {

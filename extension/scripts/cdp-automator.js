@@ -18,6 +18,33 @@
 
   const baselineMediaUrls = new Set();
 
+  // Strict blocklist of email domains & UI labels that must NEVER be detected as character names
+  const CHARACTER_BLOCKLIST = new Set([
+    'gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud', 'live', 'msn', 'aol', 'protonmail', 'zoho',
+    'characters', 'character', 'scenes', 'scene', 'library', 'tools', 'media', 'all', 'all_media', 'images', 'image',
+    'videos', 'video', 'uploads', 'upload', 'trash', 'collapse', 'expand', 'new', 'create', 'avatar', 'demo', 'pro',
+    'free', 'settings', 'help', 'profile', 'account', 'switch', 'upgrade', 'manage', 'subscription', 'sign', 'out',
+    'privacy', 'terms', 'service', 'licenses', 'agent', 'nano', 'banana', 'veo', 'omni', 'flash', 'lite', 'done',
+    'history', 'show', 'add', 'prompt', 'format', 'recent', 'search', 'assets', 'edit', 'delete', 'remove', 'cancel',
+    'approve', 'always', 'reject', 'allow', 'confirm', 'continue', 'submit', 'send', 'generate', 'reset', 'stop',
+    'start', 'clear', 'import', 'export', 'download', 'share', 'copy', 'paste', 'undo', 'redo', 'zoom', 'in',
+    'eccentric', 'professional', 'wildcard', 'familiar', 'wicked', 'fantastical', 'the', 'and', 'for', 'with'
+  ]);
+
+  let currentApprovalPolicy = 'always-approve'; // 'always-approve' | 'approve' | 'reject'
+
+  function isValidCharacterName(rawName) {
+    if (!rawName) return false;
+    const clean = String(rawName).trim().replace(/^@+/, '');
+    if (!clean || clean.length < 2 || clean.length > 24) return false;
+    if (/[.@/:\\]/.test(clean)) return false;
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(clean)) return false;
+    const lower = clean.toLowerCase();
+    if (CHARACTER_BLOCKLIST.has(lower)) return false;
+    if (/^\d+[a-z]*$/i.test(clean)) return false;
+    return true;
+  }
+
   function snapshotExistingMedia() {
     document.querySelectorAll('img[src], video[src], video source[src]').forEach((el) => {
       const src = el.src || el.currentSrc;
@@ -26,6 +53,113 @@
   }
 
   snapshotExistingMedia();
+
+  /* ==========================================================================
+     CONTINUOUS AUTO-APPROVAL & PERMISSION HANDLER (Approve / Always Approve / Reject)
+     ========================================================================== */
+  function scanAndClickApprovalButtons(policyOverride) {
+    const policy = policyOverride || currentApprovalPolicy || 'always-approve';
+    const clickedLabels = [];
+
+    const candidates = Array.from(
+      document.querySelectorAll('button, [role="button"], [role="menuitem"], a.btn, div[tabindex="0"]')
+    );
+
+    const visibleButtons = candidates.filter((btn) => {
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return false;
+      const rect = btn.getBoundingClientRect();
+      if (rect.width < 16 || rect.height < 12) return false;
+      const style = window.getComputedStyle(btn);
+      return style.visibility !== 'hidden' && style.display !== 'none' && parseFloat(style.opacity || '1') > 0.1;
+    });
+
+    if (policy === 'reject') {
+      for (const btn of visibleButtons) {
+        const text = (btn.textContent || '').trim().toLowerCase();
+        const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+        if (
+          text === 'reject' ||
+          text === 'decline' ||
+          text === 'deny' ||
+          text.startsWith('reject ') ||
+          aria.includes('reject')
+        ) {
+          if (!btn.dataset.asidzClicked) {
+            btn.dataset.asidzClicked = String(Date.now());
+            btn.click();
+            clickedLabels.push(btn.textContent.trim() || 'Reject');
+          }
+        }
+      }
+      return clickedLabels;
+    }
+
+    // Priority 1: "Always approve in project" / "Always approve" / "Always allow"
+    if (policy === 'always-approve') {
+      for (const btn of visibleButtons) {
+        const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+        if (
+          text.includes('always approve') ||
+          text.includes('approve always') ||
+          text.includes('always allow') ||
+          text.includes('approve in project') ||
+          text.includes('approve all') ||
+          aria.includes('always approve') ||
+          aria.includes('approve in project')
+        ) {
+          if (!btn.dataset.asidzClicked || Date.now() - Number(btn.dataset.asidzClicked) > 3000) {
+            btn.dataset.asidzClicked = String(Date.now());
+            btn.click();
+            clickedLabels.push(btn.textContent.trim() || 'Always approve in project');
+          }
+        }
+      }
+    }
+
+    // Priority 2: Standard "Approve" / "Allow" / "Confirm" / "Accept"
+    for (const btn of visibleButtons) {
+      const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+      if (
+        text === 'approve' ||
+        text.startsWith('approve ') ||
+        text === 'approve & continue' ||
+        text === 'allow' ||
+        text === 'always allow' ||
+        text === 'confirm' ||
+        text === 'accept' ||
+        aria === 'approve' ||
+        aria.includes('approve generation') ||
+        aria.includes('approve action')
+      ) {
+        if (!btn.dataset.asidzClicked || Date.now() - Number(btn.dataset.asidzClicked) > 3000) {
+          btn.dataset.asidzClicked = String(Date.now());
+          btn.click();
+          clickedLabels.push(btn.textContent.trim() || 'Approve');
+        }
+      }
+    }
+
+    return clickedLabels;
+  }
+
+  const approvalObserver = new MutationObserver(() => {
+    try {
+      const clicked = scanAndClickApprovalButtons();
+      if (clicked.length > 0) {
+        chrome.runtime.sendMessage({
+          type: 'CDP_LOG_EVENT',
+          level: 'INFO',
+          message: `Auto-clicked Flow permission button: "${clicked.join(', ')}"`
+        }).catch(() => {});
+      }
+    } catch (_) {}
+  });
+
+  if (document.body) {
+    approvalObserver.observe(document.body, { childList: true, subtree: true });
+  }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
@@ -39,6 +173,12 @@
         } else if (message.type === 'SCAN_CHARACTERS_IN_PAGE') {
           const chars = await deepScanCharacters();
           sendResponse({ ok: true, characters: chars });
+        } else if (message.type === 'CDP_CHECK_APPROVAL_BUTTONS') {
+          if (message.payload?.approvalPolicy) {
+            currentApprovalPolicy = message.payload.approvalPolicy;
+          }
+          const clicked = scanAndClickApprovalButtons(currentApprovalPolicy);
+          sendResponse({ ok: true, clicked });
         }
       } catch (err) {
         sendResponse({ ok: false, error: err.message });
@@ -47,87 +187,226 @@
     return true;
   });
 
-  /**
-   * Deep-scans characters from Google Flow:
-   * 1. Inspects active canvas chips and data attributes.
-   * 2. Inspects the Characters drawer / sidebar.
-   * 3. Temporarily types '@' into the prompt bar to read Flow's autocomplete list.
-   */
-  async function deepScanCharacters() {
-    const found = new Set();
-
-    // 1. Scan any rendered character elements or pills in canvas / sidebars
+  /* ==========================================================================
+     DEEP CHARACTER SCANNER (GOOGLE FLOW PROJECT CHARACTERS)
+     ========================================================================== */
+  function collectCharactersFromVisibleDOM(foundSet) {
     document.querySelectorAll('[data-character-name], [data-testid*="character"], .character-card, .character-item').forEach((el) => {
-      const name = el.getAttribute('data-character-name') || el.textContent;
-      if (name) {
-        const clean = name.trim().replace(/^@/, '');
-        if (clean && clean.length <= 25) found.add(`@${clean}`);
+      const raw = el.getAttribute('data-character-name') || el.textContent;
+      if (isValidCharacterName(raw)) {
+        foundSet.add(`@${raw.trim().replace(/^@+/, '')}`);
       }
     });
 
-    // 2. Scan text nodes containing @Name
-    document.querySelectorAll('span, p, div, button').forEach((el) => {
-      if (el.children.length === 0) {
-        const txt = (el.textContent || '').trim();
-        const matches = txt.match(/@[A-Za-z0-9_]{2,24}/g);
-        if (matches) {
-          matches.forEach((m) => found.add(m));
+    document.querySelectorAll('div, figure, article, li, button, [role="option"], [role="listitem"]').forEach((card) => {
+      const rect = card.getBoundingClientRect();
+      if (rect.top < 55 || rect.width < 40 || rect.width > 420 || rect.height < 24 || rect.height > 420) return;
+
+      const hasImg = card.querySelector('img, canvas, svg') !== null;
+      if (!hasImg) return;
+
+      const textLeaves = Array.from(card.querySelectorAll('span, div, p, h3, h4, label')).filter(
+        (el) => el.children.length === 0 && (el.textContent || '').trim().length > 0
+      );
+
+      for (const leaf of textLeaves) {
+        const txt = (leaf.textContent || '').trim();
+        if (txt.includes(' ') || txt.length > 20) continue;
+        if (isValidCharacterName(txt)) {
+          const leafRect = leaf.getBoundingClientRect();
+          if (leafRect.left > 165 && leafRect.top > 60) {
+            foundSet.add(`@${txt.replace(/^@+/, '')}`);
+          }
         }
       }
     });
+  }
 
-    // 3. Inspect the left sidebar Characters tab
-    const sidebarButtons = Array.from(document.querySelectorAll('button, div[role="button"], a, span'));
-    const charTabBtn = sidebarButtons.find((el) => {
-      const t = (el.textContent || '').trim().toLowerCase();
+  async function deepScanCharacters() {
+    const found = new Set();
+
+    // 1. Collect any characters already visible on the current view
+    collectCharactersFromVisibleDOM(found);
+
+    // 2. Open the Left Sidebar "Characters" tab (as seen in Google Flow's left nav)
+    const allNavElements = Array.from(document.querySelectorAll('a, button, div[role="button"], span, li'));
+    const charNavBtn = allNavElements.find((el) => {
+      const txt = (el.textContent || '').trim().toLowerCase();
       const rect = el.getBoundingClientRect();
-      return (t === 'characters' || t.includes('character')) && rect.left < 260 && rect.top < 380;
+      return txt === 'characters' && rect.left < 220 && rect.top > 60 && rect.top < 450 && rect.width > 20;
     });
 
-    if (charTabBtn && found.size === 0) {
-      // Temporarily open Characters panel to read names
-      charTabBtn.click();
-      await new Promise((r) => setTimeout(r, 400));
-      document.querySelectorAll('h3, h4, span, div').forEach((el) => {
+    const allMediaNavBtn = allNavElements.find((el) => {
+      const txt = (el.textContent || '').trim().toLowerCase();
+      const rect = el.getBoundingClientRect();
+      return (txt === 'all media' || txt === 'scenes' || txt === 'images') && rect.left < 220 && rect.top > 50 && rect.top < 350;
+    });
+
+    if (charNavBtn) {
+      const clickTarget = charNavBtn.closest('button, a, div[role="button"], li') || charNavBtn;
+      clickTarget.click();
+      await sleep(550);
+      collectCharactersFromVisibleDOM(found);
+
+      document.querySelectorAll('span, div, h3, h4, p').forEach((el) => {
+        if (el.children.length > 0) return;
+        const txt = (el.textContent || '').trim();
+        if (!txt || txt.includes(' ')) return;
         const rect = el.getBoundingClientRect();
-        if (rect.left < 360 && rect.width > 20 && rect.height > 12) {
-          const t = (el.textContent || '').trim();
-          if (t && /^[A-Za-z0-9_-]{2,20}$/.test(t) && !['characters', 'scenes', 'library', 'tools', 'media', 'create', 'all'].includes(t.toLowerCase())) {
-            found.add(`@${t}`);
+        if (rect.left > 180 && rect.top > 70 && rect.top < window.innerHeight - 120 && rect.width > 12) {
+          if (isValidCharacterName(txt)) {
+            found.add(`@${txt.replace(/^@+/, '')}`);
           }
         }
       });
     }
 
-    // 4. Try @-mention autocomplete in prompt bar if still empty
+    // 3. If still empty, check the Bottom Dock "+" Asset Picker Popover -> "Characters" tab
     if (found.size === 0) {
-      const input = findFlowBottomPromptInput();
-      if (input) {
-        input.focus();
-        setReactControlledValue(input, '@');
-        await new Promise((r) => setTimeout(r, 450));
-        document.querySelectorAll('[role="listbox"] [role="option"], [role="menu"] [role="menuitem"], .mention-item').forEach((opt) => {
-          const t = (opt.textContent || '').trim().replace(/^@/, '');
-          if (t) found.add(`@${t}`);
+      const plusBtn = findBottomDockPlusButton();
+      if (plusBtn) {
+        plusBtn.click();
+        await sleep(450);
+
+        const popoverCharTab = Array.from(document.querySelectorAll('button, div[role="button"], span, li')).find((el) => {
+          const t = (el.textContent || '').trim().toLowerCase();
+          const r = el.getBoundingClientRect();
+          return t === 'characters' && r.top > window.innerHeight * 0.35;
         });
-        setReactControlledValue(input, '');
+
+        if (popoverCharTab) {
+          (popoverCharTab.closest('button, div[role="button"], li') || popoverCharTab).click();
+          await sleep(400);
+        }
+
+        document.querySelectorAll('span, div, p, li').forEach((el) => {
+          if (el.children.length > 0) return;
+          const t = (el.textContent || '').trim();
+          const r = el.getBoundingClientRect();
+          if (r.top > window.innerHeight * 0.35 && r.top < window.innerHeight - 90 && r.left > 180 && r.left < 700) {
+            if (!t.includes(' ') && isValidCharacterName(t)) {
+              found.add(`@${t.replace(/^@+/, '')}`);
+            }
+          }
+        });
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+        await sleep(150);
       }
+    }
+
+    if (charNavBtn && allMediaNavBtn) {
+      try {
+        (allMediaNavBtn.closest('button, a, div[role="button"], li') || allMediaNavBtn).click();
+      } catch (_) {}
     }
 
     return Array.from(found);
   }
 
-  /**
-   * Prepares the Google Flow canvas for prompt generation:
-   * 1. Takes a fresh snapshot of existing media.
-   * 2. Locates the bottom prompt dock (strictly y > window.innerHeight * 0.65).
-   * 3. Sets target model (Nano Banana 2.1 for image, Veo for video).
-   * 4. Injects reference assets.
-   * 5. Sets prompt text via React prototype setters.
-   * 6. Returns exact coordinates of bottom dock arrow button.
-   */
+  function findBottomDockPlusButton() {
+    const minTop = window.innerHeight * 0.65;
+    const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+    return buttons.find((btn) => {
+      const r = btn.getBoundingClientRect();
+      if (r.top < minTop || r.left > window.innerWidth * 0.45) return false;
+      const txt = (btn.textContent || '').trim();
+      const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+      return txt === '+' || aria.includes('add') || aria.includes('attach') || aria.includes('ingredient');
+    });
+  }
+
+  /* ==========================================================================
+     ATTACH PROJECT CHARACTERS VIA FLOW'S "+" ASSET PICKER POPOVER
+     ========================================================================== */
+  async function attachCharactersFromFlowPicker(characterTags) {
+    if (!Array.isArray(characterTags) || characterTags.length === 0) return;
+
+    const plusBtn = findBottomDockPlusButton();
+    if (!plusBtn) return;
+
+    for (const charTag of characterTags) {
+      const bareName = charTag.replace(/^@+/, '').trim();
+      if (!bareName) continue;
+
+      try {
+        plusBtn.click();
+        await sleep(380);
+
+        const popoverCharTab = Array.from(document.querySelectorAll('button, div[role="button"], span, li')).find((el) => {
+          const t = (el.textContent || '').trim().toLowerCase();
+          const r = el.getBoundingClientRect();
+          return t === 'characters' && r.top > window.innerHeight * 0.3;
+        });
+
+        if (popoverCharTab) {
+          (popoverCharTab.closest('button, div[role="button"], li') || popoverCharTab).click();
+          await sleep(300);
+        }
+
+        const searchInput = Array.from(document.querySelectorAll('input[type="text"], input[placeholder*="Search" i]')).find((inp) => {
+          const r = inp.getBoundingClientRect();
+          return r.top > window.innerHeight * 0.3 && r.width > 60;
+        });
+
+        if (searchInput) {
+          setReactControlledValue(searchInput, bareName);
+          await sleep(250);
+        }
+
+        const charRow = Array.from(document.querySelectorAll('div, li, button, span')).find((el) => {
+          if (el.children.length > 0) return false;
+          const t = (el.textContent || '').trim().toLowerCase();
+          const r = el.getBoundingClientRect();
+          return t === bareName.toLowerCase() && r.top > window.innerHeight * 0.3 && r.top < window.innerHeight - 80;
+        });
+
+        if (charRow) {
+          const clickableRow = charRow.closest('li, button, div[role="button"], div[role="option"], div[tabindex]') || charRow;
+          clickableRow.click();
+          await sleep(250);
+
+          const addToPromptBtn = Array.from(document.querySelectorAll('button, div[role="button"]')).find((b) => {
+            const t = (b.textContent || '').trim().toLowerCase();
+            return t.includes('add to prompt') || t === 'add' || t === 'insert';
+          });
+          if (addToPromptBtn) {
+            addToPromptBtn.click();
+            await sleep(250);
+          }
+        } else {
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+          await sleep(150);
+        }
+      } catch (_) {}
+    }
+  }
+
+  /* ==========================================================================
+     PREPARE PROMPT STEP (TAG CHARACTERS, APPLY SETTINGS, RETURN DOCK COORDS)
+     ========================================================================== */
   async function preparePromptStep({ mode, promptItem, settings }) {
     snapshotExistingMedia();
+
+    if (settings?.approvalPolicy) {
+      currentApprovalPolicy = settings.approvalPolicy;
+    }
+
+    // Click any pre-existing approval banner before injecting
+    scanAndClickApprovalButtons(currentApprovalPolicy);
+
+    // Automatically scan characters from Flow if none were synced yet and autoCharacter is on
+    let activeCharacters = Array.isArray(promptItem.matchedCharacters) ? [...promptItem.matchedCharacters] : [];
+    if (settings?.autoCharacter && activeCharacters.length === 0) {
+      const scanned = await deepScanCharacters();
+      for (const charTag of scanned) {
+        const bare = charTag.replace(/^@+/, '');
+        const regex = new RegExp(`(@?\\b${bare}\\b)`, 'i');
+        if (regex.test(promptItem.cleanPrompt)) {
+          activeCharacters.push(charTag);
+        }
+      }
+    }
 
     const inputEl = findFlowBottomPromptInput();
     if (!inputEl) {
@@ -137,34 +416,53 @@
       };
     }
 
-    // Apply model setting in bottom dock
+    // 1. Apply model setting in bottom dock
     await applyModelSettingInBottomDock(mode, settings);
 
-    // Attach reference images if present
+    // 2. Attach matched characters from Flow's "+" Character Picker if present
+    if (activeCharacters.length > 0) {
+      await attachCharactersFromFlowPicker(activeCharacters);
+    }
+
+    // 3. Attach reference images if present
     if (Array.isArray(promptItem.matchedImages) && promptItem.matchedImages.length > 0) {
       await attachReferenceImages(promptItem.matchedImages);
     }
 
-    // Focus bottom prompt input
-    inputEl.scrollIntoView({ behavior: 'instant', block: 'center' });
-    inputEl.focus();
-
+    // 4. Tag character names directly inside the scene prompt (e.g. "ALI" -> "@Ali")
     let composedPrompt = promptItem.cleanPrompt;
+    if (activeCharacters.length > 0) {
+      for (const charTag of activeCharacters) {
+        const bare = charTag.replace(/^@+/, '');
+        const wordRegex = new RegExp(`(?<!@)\\b${bare}\\b`, 'gi');
+        if (wordRegex.test(composedPrompt)) {
+          composedPrompt = composedPrompt.replace(wordRegex, `@${bare}`);
+        } else if (!composedPrompt.toLowerCase().includes(`@${bare.toLowerCase()}`)) {
+          composedPrompt = `@${bare} ${composedPrompt}`;
+        }
+      }
+    }
+
     if (promptItem.matchedVoices?.length > 0 && !composedPrompt.toLowerCase().includes('voice')) {
       composedPrompt += ` [Voice: ${promptItem.matchedVoices.join(', ')}]`;
     }
 
-    // Set React controlled value
-    setReactControlledValue(inputEl, composedPrompt);
+    // Re-locate bottom input in case DOM updated after modal close
+    const finalInputEl = findFlowBottomPromptInput() || inputEl;
+    finalInputEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+    finalInputEl.focus();
 
-    const inputRect = inputEl.getBoundingClientRect();
+    // Set React controlled value
+    setReactControlledValue(finalInputEl, composedPrompt);
+
+    const inputRect = finalInputEl.getBoundingClientRect();
     const inputCoords = {
-      x: inputRect.left + inputRect.width / 2,
+      x: inputRect.left + Math.min(120, inputRect.width / 3),
       y: inputRect.top + inputRect.height / 2
     };
 
     // Locate the Submit Arrow Button strictly inside the bottom creation dock
-    const submitBtn = findFlowBottomSubmitButton(inputEl);
+    const submitBtn = findFlowBottomSubmitButton(finalInputEl);
     let submitCoords = null;
 
     if (submitBtn) {
@@ -174,14 +472,12 @@
         y: submitRect.top + submitRect.height / 2
       };
 
-      // In-page click backup
       setTimeout(() => {
         try {
           submitBtn.click();
         } catch (_) {}
-      }, 300);
+      }, 350);
     } else {
-      // Fallback coordinate: right end of bottom prompt bar
       submitCoords = {
         x: inputRect.right - 24,
         y: inputRect.top + inputRect.height / 2
@@ -190,8 +486,9 @@
 
     return {
       ok: true,
-      matchedSelector: getSelectorForElement(inputEl),
+      matchedSelector: getSelectorForElement(finalInputEl),
       composedPrompt,
+      matchedCharacters: activeCharacters,
       inputCoords,
       submitCoords
     };
@@ -371,12 +668,24 @@
    * Polls Google Flow's canvas for the newly generated output media.
    * Filters out all avatars, UI icons, Google logos, and files that were in the baseline snapshot.
    */
-  function pollForNewMedia({ mode, promptTag, timeoutMs = 28000 }) {
+  function pollForNewMedia({ mode, promptTag, approvalPolicy, timeoutMs = 45000 }) {
     const isImageMode = mode === 'text-to-image' || mode === 'image-to-image';
     const startTime = Date.now();
+    if (approvalPolicy) {
+      currentApprovalPolicy = approvalPolicy;
+    }
 
     return new Promise((resolve) => {
       const checkInterval = setInterval(() => {
+        const clickedApprovals = scanAndClickApprovalButtons(currentApprovalPolicy);
+        if (clickedApprovals.length > 0) {
+          chrome.runtime.sendMessage({
+            type: 'CDP_LOG_EVENT',
+            level: 'INFO',
+            message: `Auto-clicked "${clickedApprovals.join(', ')}" during generation.`
+          }).catch(() => {});
+        }
+
         const selector = isImageMode ? 'img[src]' : 'video[src], video source[src]';
         const elements = Array.from(document.querySelectorAll(selector));
 
@@ -384,7 +693,6 @@
           const src = el.src || el.currentSrc;
           if (!src || baselineMediaUrls.has(src)) continue;
 
-          // Filter out UI assets, avatars, small icons, Google brand images
           const lower = src.toLowerCase();
           if (
             lower.includes('avatar') ||
@@ -398,7 +706,6 @@
             continue;
           }
 
-          // In image mode, skip low-res UI thumbnails
           if (isImageMode && el.naturalWidth && el.naturalWidth < 256) {
             continue;
           }
@@ -433,5 +740,9 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
   }
 })();
