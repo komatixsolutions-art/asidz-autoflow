@@ -492,8 +492,8 @@ async function runBatchLoop(tabId, mode, prompts, settings) {
 
     // Jitter delay between prompts
     if (i < prompts.length - 1 && !batchState.stopRequested) {
-      const minMs = (settings.delayMin || 0) * 1000;
-      const maxMs = Math.max(minMs, (settings.delayMax || 20) * 1000);
+      const minMs = (settings.delayMin ?? 0) * 1000;
+      const maxMs = Math.max(minMs, (settings.delayMax ?? 3) * 1000);
       const waitMs = Math.floor(minMs + Math.random() * (maxMs - minMs));
       if (waitMs > 0) {
         broadcastLog('INFO', `Cooldown delay: waiting ${(waitMs / 1000).toFixed(1)}s before next prompt...`);
@@ -545,10 +545,18 @@ async function executeSinglePromptViaCDP(tabId, mode, promptItem, settings) {
     return { ok: false, error: prep?.error || 'Could not locate Google Flow prompt input bar' };
   }
 
+  // 0. If dock settings popover actions were recorded, log them
+  if (Array.isArray(prep.dockClickActions) && prep.dockClickActions.length > 0) {
+    broadcastLog(
+      'CDP',
+      `Synced Flow dock settings: ${prep.dockClickActions.map((a) => a.label).join(' → ')}`
+    );
+  }
+
   // 1. Hardware click to focus the input box
   if (prep.inputCoords) {
     await dispatchTrustedClick(tabId, prep.inputCoords.x, prep.inputCoords.y);
-    await sleep(150);
+    await sleep(120);
   }
 
   // 2. Clear existing text and dispatch trusted hardware typing via CDP

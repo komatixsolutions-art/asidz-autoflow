@@ -453,8 +453,8 @@
       };
     }
 
-    // 1. Apply model setting in bottom dock
-    await applyModelSettingInBottomDock(mode, settings);
+    // 1. Apply model setting & collect hardware click sequence for the bottom dock popover
+    const dockClickActions = await applyModelSettingInBottomDock(mode, settings);
 
     // 2. Attach matched characters from Flow's "+" Character Picker if present
     if (activeCharacters.length > 0) {
@@ -526,6 +526,7 @@
       matchedSelector: getSelectorForElement(finalInputEl),
       composedPrompt,
       matchedCharacters: activeCharacters,
+      dockClickActions,
       inputCoords,
       submitCoords
     };
@@ -615,20 +616,37 @@
   }
 
   /**
-   * Applies model setting (Nano Banana 2.1 vs Veo / Omni) AND ensures the "Agent" toggle
-   * is OFF during direct image/video modes (so Flow generates directly without asking chat confirmation),
-   * or ON when mode === 'agent-automation'.
+   * Synchronizes all extension settings (Mode: Image vs Video, Sub-mode: Frames vs Ingredients,
+   * Aspect Ratio: 16:9 vs 9:16, Model: Nano Banana / Omni Flash / Veo, Duration: 4s/6s/8s/10s,
+   * and Outputs per prompt: x1/x2/x3/x4) directly with Google Flow's bottom dock settings popover.
+   * Also returns hardware click coordinates so the Service Worker can dispatch trusted CDP clicks.
    */
   async function applyModelSettingInBottomDock(mode, settings) {
     const isImageMode = mode === 'text-to-image' || mode === 'image-to-image';
-    const targetModelKeyword = isImageMode ? 'Nano Banana' : 'Veo';
-    const minTop = window.innerHeight * 0.58;
+    const desiredOutputs = `x${settings?.outputsPerPrompt || '1'}`;
+    const desiredRatio = settings?.aspectRatio || '16:9';
+    const desiredDuration = settings?.chainOrDuration || '8s';
+    const minTop = window.innerHeight * 0.55;
+    const dockActions = [];
+
+    const addCoords = (el, label) => {
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 5 && r.height > 5) {
+        dockActions.push({
+          label,
+          x: Math.round(r.left + r.width / 2),
+          y: Math.round(r.top + r.height / 2)
+        });
+      }
+    };
 
     const dockButtons = Array.from(document.querySelectorAll('button, div[role="button"]')).filter((b) => {
       const r = b.getBoundingClientRect();
-      return r.top >= minTop && r.height <= 60;
+      return r.top >= minTop && r.height <= 65;
     });
 
+    // 1. Ensure "Agent" button in bottom dock matches mode
     const agentBtn = dockButtons.find((b) => normalizeButtonLabel(b.textContent) === 'agent');
     if (agentBtn) {
       const isAgentActive =
@@ -637,15 +655,14 @@
         agentBtn.classList.contains('active') ||
         agentBtn.classList.contains('selected');
 
-      if (mode === 'agent-automation' && !isAgentActive) {
+      if ((mode === 'agent-automation' && !isAgentActive) || (mode !== 'agent-automation' && isAgentActive)) {
         fireFullClickSequence(agentBtn);
-        await sleep(200);
-      } else if (mode !== 'agent-automation' && isAgentActive) {
-        fireFullClickSequence(agentBtn);
-        await sleep(200);
+        addCoords(agentBtn, 'Toggle Agent');
+        await sleep(150);
       }
     }
 
+    // 2. Locate the Settings Pill in the bottom dock (e.g. "Nano Banana 2.1 [] x2" or "Video · 720p · 10s [] x1")
     const modelPill = dockButtons.find((b) => {
       const text = (b.textContent || '').trim();
       return (
@@ -654,45 +671,89 @@
         text.includes('Omni') ||
         text.includes('Flash') ||
         text.includes('Video') ||
-        text.includes('Image')
+        text.includes('Image') ||
+        /x[1-4]\b/i.test(text)
       );
     });
 
-    if (modelPill) {
-      const currentText = (modelPill.textContent || '').trim();
-      const needsSwitch = isImageMode
-        ? !currentText.includes('Nano Banana') && !currentText.includes('Image')
-        : currentText.includes('Nano Banana') || currentText.includes('Image');
+    if (!modelPill) return dockActions;
 
-      if (needsSwitch) {
-        fireFullClickSequence(modelPill);
-        await sleep(280);
+    const pillText = (modelPill.textContent || '').replace(/\s+/g, ' ').trim();
+    const pillHasRightMode = isImageMode
+      ? pillText.includes('Nano Banana') || pillText.includes('Image')
+      : pillText.includes('Video') || pillText.includes('Veo') || pillText.includes('Omni');
+    const pillHasRightCount = pillText.toLowerCase().includes(desiredOutputs.toLowerCase());
 
-        const tabTarget = isImageMode ? 'image' : 'video';
-        const modeTab = Array.from(document.querySelectorAll('button, div[role="button"], [role="tab"]')).find((el) => {
-          const t = normalizeButtonLabel(el.textContent);
+    // Open the bottom dock settings popover if mode, output count (x1/x2/x3/x4), or settings need syncing
+    if (!pillHasRightMode || !pillHasRightCount || settings?._forceSyncPopover !== false) {
+      fireFullClickSequence(modelPill);
+      addCoords(modelPill, 'Open Dock Settings Pill');
+      await sleep(240);
+
+      const findPopoverBtn = (predicate) => {
+        const allEls = Array.from(document.querySelectorAll('button, [role="button"], [role="tab"], [role="radio"], [role="option"], li, span'));
+        return allEls.find((el) => {
           const r = el.getBoundingClientRect();
-          return t === tabTarget && r.top > window.innerHeight * 0.35;
+          if (r.top < window.innerHeight * 0.35 || r.top > window.innerHeight - 55) return false;
+          if (r.width < 18 || r.width > 280 || r.height < 14 || r.height > 60) return false;
+          if (el.querySelectorAll('button, [role="button"]').length > 0) return false;
+          const raw = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          return predicate(raw.toLowerCase(), normalizeButtonLabel(raw), el);
         });
-        if (modeTab) {
-          fireFullClickSequence(modeTab);
-          await sleep(200);
-        }
+      };
 
-        const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], li, button, div[role="button"]'));
-        const match = menuItems.find((item) => {
-          const r = item.getBoundingClientRect();
-          return r.top > window.innerHeight * 0.35 && (item.textContent || '').includes(targetModelKeyword);
-        });
-        if (match) {
-          fireFullClickSequence(match);
-          await sleep(180);
-        }
+      // Row 1: Click "Image" or "Video" tab
+      const targetPrimaryTab = isImageMode ? 'image' : 'video';
+      const primaryTabBtn = findPopoverBtn((raw, norm) => norm === targetPrimaryTab || raw.endsWith(targetPrimaryTab));
+      if (primaryTabBtn) {
+        fireFullClickSequence(primaryTabBtn);
+        addCoords(primaryTabBtn, `Mode Tab: ${targetPrimaryTab}`);
+        await sleep(160);
+      }
 
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      // Row 2 (Video sub-mode): "Frames" vs "Ingredients"
+      if (!isImageMode && (mode === 'frame-to-video' || mode === 'ingredients-to-video')) {
+        const subTarget = mode === 'frame-to-video' ? 'frames' : 'ingredients';
+        const subBtn = findPopoverBtn((raw, norm) => norm.includes(subTarget) || raw.includes(subTarget));
+        if (subBtn) {
+          fireFullClickSequence(subBtn);
+          addCoords(subBtn, `Video Sub-mode: ${subTarget}`);
+          await sleep(120);
+        }
+      }
+
+      // Row 3: Aspect Ratio ("16:9" or "9:16")
+      const ratioBtn = findPopoverBtn((raw) => raw.includes(desiredRatio));
+      if (ratioBtn) {
+        fireFullClickSequence(ratioBtn);
+        addCoords(ratioBtn, `Aspect Ratio: ${desiredRatio}`);
+        await sleep(100);
+      }
+
+      // Row 5 (Video Duration): "4s", "6s", "8s", "10s"
+      if (!isImageMode && /^\d+s$/i.test(desiredDuration)) {
+        const durBtn = findPopoverBtn((raw, norm) => norm === desiredDuration.toLowerCase() || raw === desiredDuration.toLowerCase());
+        if (durBtn) {
+          fireFullClickSequence(durBtn);
+          addCoords(durBtn, `Duration: ${desiredDuration}`);
+          await sleep(100);
+        }
+      }
+
+      // Row 6: Outputs per prompt ("x1", "x2", "x3", "x4")
+      const countBtn = findPopoverBtn((raw, norm) => norm === desiredOutputs.toLowerCase() || raw === desiredOutputs.toLowerCase());
+      if (countBtn) {
+        fireFullClickSequence(countBtn);
+        addCoords(countBtn, `Outputs: ${desiredOutputs}`);
         await sleep(120);
       }
+
+      // Close the popover by pressing Escape
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      await sleep(100);
     }
+
+    return dockActions;
   }
 
   /**
@@ -752,9 +813,10 @@
    * Polls Google Flow's canvas for the newly generated output media.
    * Filters out all avatars, UI icons, Google logos, and files that were in the baseline snapshot.
    */
-  function pollForNewMedia({ mode, promptTag, approvalPolicy, timeoutMs = 45000 }) {
+  function pollForNewMedia({ mode, promptTag, approvalPolicy, timeoutMs = 12000 }) {
     const isImageMode = mode === 'text-to-image' || mode === 'image-to-image';
     const startTime = Date.now();
+    let generationStarted = false;
     if (approvalPolicy) {
       currentApprovalPolicy = approvalPolicy;
     }
@@ -767,6 +829,17 @@
             type: 'CDP_APPROVAL_ACTIONS_NEEDED',
             payload: { actions }
           }).catch(() => {});
+        }
+
+        if (!generationStarted) {
+          const hasProgressIndicator = Array.from(document.querySelectorAll('span, div')).some((el) => {
+            if (el.children.length > 0) return false;
+            const txt = (el.textContent || '').trim();
+            return /^\d{1,2}%$/.test(txt);
+          });
+          if (hasProgressIndicator) {
+            generationStarted = true;
+          }
         }
 
         const selector = isImageMode ? 'img[src]' : 'video[src], video source[src]';
@@ -808,11 +881,11 @@
           return;
         }
 
-        if (Date.now() - startTime >= timeoutMs) {
+        if ((generationStarted && Date.now() - startTime >= 4000) || Date.now() - startTime >= timeoutMs) {
           clearInterval(checkInterval);
-          resolve({ ok: false, mediaUrl: null });
+          resolve({ ok: true, mediaUrl: null, queuedInFlow: generationStarted });
         }
-      }, 1000);
+      }, 600);
     });
   }
 

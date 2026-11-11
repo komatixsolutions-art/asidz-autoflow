@@ -49,7 +49,7 @@ const state = {
     concurrency: 1,
     agentOutputs: 2,
     delayMin: 0,
-    delayMax: 20,
+    delayMax: 5,
     maxRetries: 1,
     zoomOutFlow: true,
     approvalPolicy: 'always-approve',
