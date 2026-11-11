@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AsidZ AutoFlow Pro — Cloud SaaS &amp; License Portal</title>
+  <link rel="icon" type="image/png" href="asidz-logo.png" />
+  <style>
+    :root {
+      --bg-dark: #110508;
+      --bg-card: rgba(31, 10, 17, 0.92);
+      --border: rgba(217, 27, 92, 0.35);
+      --accent: #e01e63;
+      --accent-bright: #ff3377;
+      --text: #f9eef2;
+      --muted: #b8949f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at top, #2c0b16 0%, #110508 70%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      padding: 32px 20px;
+    }
+    .container {
+      max-width: 1020px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .hero {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    }
+    .hero-brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .hero-logo-img {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      object-fit: cover;
+      box-shadow: 0 0 16px rgba(224, 30, 99, 0.7);
+      border: 2px solid var(--accent-bright);
+    }
+    .hero h1 { font-size: 24px; margin-bottom: 4px; }
+    .hero p { color: var(--muted); font-size: 13.5px; }
+    .demo-key-box {
+      background: rgba(224, 30, 99, 0.16);
+      border: 1px solid var(--accent-bright);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+    }
+    .demo-key-box code {
+      font-weight: 700;
+      color: #ff85ad;
+      font-size: 14px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+    }
+    .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+    .stat-val { font-size: 28px; font-weight: 800; margin-top: 6px; color: #ffffff; }
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 768px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card h2 { font-size: 17px; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 12.5px; color: var(--muted); }
+    .field input, .field select {
+      background: #140509;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #fff;
+      font-size: 13.5px;
+    }
+    .btn {
+      background: linear-gradient(90deg, #b8144d, #e01e63);
+      border: 1px solid var(--accent-bright);
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13.5px;
+    }
+    .btn:hover { filter: brightness(1.12); }
+    .result-box {
+      background: rgba(15, 4, 8, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      color: #86efac;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); text-align: left; }
+    th { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="hero-brand">
+        <img src="asidz-logo.png" alt="AsidZ Logo" class="hero-logo-img" />
+        <div>
+          <h1>AsidZ AutoFlow Pro — Cloud SaaS Portal</h1>
+          <p>Manage Chrome Extension License Keys, Daily Quota Metering &amp; Pro Tier Subscriptions.</p>
+        </div>
+      </div>
+      <div class="demo-key-box">
+        Pre-activated Demo Pro Key:<br />
+        <code>PRO-AUTOMA-8888-DEMO</code>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Registered Accounts</div>
+        <div class="stat-val" id="statTotalUsers">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Active Pro Licenses</div>
+        <div class="stat-val" id="statProUsers">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Cloud Generations</div>
+        <div class="stat-val" id="statTotalGenerations">0</div>
+      </div>
+    </div>
+
+    <div class="main-grid">
+      <!-- Create Account / Generate Key -->
+      <div class="card">
+        <h2>1. Generate New License Key</h2>
+        <div class="field">
+          <label>Creator Email</label>
+          <input type="email" id="regEmail" placeholder="creator@asidz.com" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="regPassword" placeholder="••••••••" />
+        </div>
+        <div class="field">
+          <label>Subscription Plan</label>
+          <select id="regTier">
+            <option value="FREE">Free Tier (10 generations/day, 5 batch max)</option>
+            <option value="PRO">Pro Tier ($29/mo — Unlimited + 5x Parallel CDP)</option>
+          </select>
+        </div>
+        <button class="btn" id="registerBtn">Create Account &amp; Issue License Key</button>
+        <div class="result-box" id="registerResult">Ready to issue license key...</div>
+      </div>
+
+      <!-- Verify or Upgrade Key -->
+      <div class="card">
+        <h2>2. Verify or Upgrade Existing Key</h2>
+        <div class="field">
+          <label>License Key</label>
+          <input type="text" id="checkKeyInput" value="PRO-AUTOMA-8888-DEMO" />
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn" id="verifyBtn" style="flex:1;">Verify Quota</button>
+          <button class="btn" id="upgradeBtn" style="flex:1;">Upgrade Key to PRO</button>
+        </div>
+        <div class="result-box" id="verifyResult">Click Verify Quota to inspect key...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Live Extension Generation Telemetry</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>License Key</th>
+            <th>Workflow Mode</th>
+            <th>Prompt #Tag</th>
+          </tr>
+        </thead>
+        <tbody id="telemetryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/v1/stats');
+        const data = await res.json();
+        if (!data.ok) return;
+        document.getElementById('statTotalUsers').textContent = data.totalUsers;
+        document.getElementById('statProUsers').textContent = data.proUsers;
+        document.getElementById('statTotalGenerations').textContent = data.totalGenerations;
+
+        const tbody = document.getElementById('telemetryBody');
+        tbody.innerHTML = (data.recentLogs || []).map(row => `
+          <tr>
+            <td>${new Date(row.created_at).toLocaleTimeString()}</td>
+            <td><code>${row.license_key}</code></td>
+            <td>${row.mode}</td>
+            <td>${row.prompt_tag}</td>
+          </tr>
+        `).join('') || '<tr><td colspan="4">No generations logged yet.</td></tr>';
+      } catch (err) {
+        console.warn('Failed to load stats:', err);
+      }
+    }
+
+    document.getElementById('registerBtn').addEventListener('click', async () => {
+      const email = document.getElementById('regEmail').value;
+      const password = document.getElementById('regPassword').value;
+      const tier = document.getElementById('regTier').value;
+      const res = await fetch('/api/v1/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, tier })
+      });
+      const data = await res.json();
+      document.getElementById('registerResult').textContent = JSON.stringify(data, null, 2);
+      if (data.licenseKey) {
+        document.getElementById('checkKeyInput').value = data.licenseKey;
+      }
+      loadStats();
+    });
+
+    document.getElementById('verifyBtn').addEventListener('click', async () => {
+      const licenseKey = document.getElementById('checkKeyInput').value;
+      const res = await fetch('/api/v1/license/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ licenseKey })
+      });
+      const data = await res.json();
+      document.getElementById('verifyResult').textContent = JSON.stringify(data, null, 2);
+    });
+
+    document.getElementById('upgradeBtn').addEventListener('click', async () => {
+      const licenseKey = document.getElementById('checkKeyInput').value;
+      const res = await fetch('/api/v1/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ licenseKey })
+      });
+      const data = await res.json();
+      if (data.licenseKey) {
+        document.getElementById('checkKeyInput').value = data.licenseKey;
+      }
+      document.getElementById('verifyResult').textContent = JSON.stringify(data, null, 2);
+      loadStats();
+    });
+
+    loadStats();
+  </script>
+</body>
+</html>

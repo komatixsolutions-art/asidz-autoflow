@@ -1,0 +1,16 @@
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Database & logs
+*.db
+*.db-journal
+server.log
+autoflow_saas.db
+
+# Video analysis raw captures (optional keep or ignore)
+video-analysis/source_video.mp4
