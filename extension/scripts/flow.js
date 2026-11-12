@@ -1992,21 +1992,13 @@
     return `Scene${cfg.promptIndex || 1}`;
   }
 
-  function formatTimestamp(date) {
-    const d = date || new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}${pad(d.getMinutes())}_${pad(d.getDate())}${pad(d.getMonth() + 1)}${d.getFullYear()}`;
-  }
-
   function fileStem(cfg, isVideo, i, total) {
     const type = isVideo ? 'video' : 'image';
     const suffix = total > 1 ? `_${i + 1}` : '';
     if (cfg.fileNamingSystem === 'simple') return `${cfg.promptIndex} ${type}${suffix}`;
     const proj = getProjectName();
     const scene = extractSceneLabel(cfg);
-    const attempt = `v${cfg.attempt || 1}`;
-    const ts = formatTimestamp();
-    return `${proj}_${scene}_${attempt}_${ts}${suffix}`;
+    return `${proj}_${scene}${suffix}`;
   }
 
   A.fileStem = fileStem;
