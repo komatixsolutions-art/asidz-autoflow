@@ -12,5 +12,7 @@ npm-debug.log*
 server.log
 autoflow_saas.db
 
-# Video analysis raw captures (optional keep or ignore)
-video-analysis/source_video.mp4
+# Large binaries & temporary archives
+*.zip
+reference-extension/
+video-analysis/

@@ -1,951 +1,942 @@
 /**
- * AsidZ AutoFlow — Side Panel UI Controller
- * Manages 6 Generation Modes, Image Asset Auto-Matching, Voice & @Character Sync,
- * Multiline Prompt Parsing (#tag support), CDP Execution Queue, Settings, and Live Logs.
+ * AsidZ AutoFlow — Side Panel Controller
+ * Official Platform: https://asidz.com
+ *
+ * Coordinates:
+ * - 6 Generation Modes (Text-to-Video, Frame-to-Video, Ingredients-to-Video, Text-to-Image, Image-to-Image, Agent)
+ * - Flow Dock synchronization (Aspect Ratio, Output Count x1-x4, Model picker, Durations & Concat Chains)
+ * - Intelligent Character Tagging (@character preservation) & Voice Library Sync
+ * - Dual-worker background queue execution & real-time log streaming
  */
+'use strict';
 
-const MODE_DESCRIPTIONS = {
-  'text-to-video': 'Generate cinematic videos consecutively from your batch prompt script.',
-  'frame-to-video': 'Animate start-frame and end-frame image sequences into smooth transitions.',
-  'ingredients-to-video': 'Use images as ingredients (characters, objects, places) inside the video.',
-  'text-to-image': 'Generate high-resolution images from text using Nano Banana 2.1.',
-  'image-to-image': 'Transform or chain-edit existing reference images with each prompt.',
-  'agent-automation': 'Autonomous multi-output iterative generation agent inside Google Flow.'
+const FLOW_URL = 'https://flow.google.com/';
+const SETTINGS_KEY = 'asidz_settings';
+const FORM_KEY = 'asidz_form';
+const CHARS_KEY = 'asidz_scanned_characters';
+const SELECTORS_KEY = 'asidz_custom_selectors';
+const VOICES_KEY = 'asidz_scanned_voices';
+const CHUNK = 1024 * 1024;
+
+const DEFAULTS = {
+  mode: 'textToVideo',
+  agentType: 'agentAutomationToImage',
+  aspectRatio: '16:9',
+  outputCount: 1, // Default to 1 output per scene as requested
+  agentOutputCount: 2,
+  concurrentPrompts: 1,
+  promptDelaySecondsMin: 0,
+  promptDelaySecondsMax: 5,
+  model: 'Veo 3.1 - Lite',
+  imageModel: 'Nano Banana 2.1',
+  defaultVideoOption: '8s',
+  defaultImageOption: 'new-image',
+  imageToVideoMaxImagesPerPrompt: 1,
+  componentsToVideoMaxImagesPerPrompt: 3,
+  imageToImageMaxImagesPerPrompt: 3,
+  agentMaxImagesPerPrompt: 3,
+  maxRetries: 1,
+  autoDownloadVideoQuality: '720',
+  autoDownloadImageQuality: '1k',
+  autoAddCharacterImages: false,
+  autoAddVoiceBySpeaker: false,
+  defaultSpeaker: 'none',
+  enableCharacterControl: true, // Auto @character enabled by default
+  defaultCharacters: [],
+  autoChangeFileName: true,
+  fileNamingSystem: 'prompt_tag',
+  folderName: 'asidz-flow',
+  zoomOutWhileRunning: true
 };
 
-const state = {
-  activeTab: 'control',
-  mode: 'text-to-video',
-  connectedTabId: null,
-  isFlowConnected: false,
-  uploadedImages: [], // [{ id, name, baseName, dataUrl, mimeType }]
-  scannedCharacters: [], // Populated ONLY when scanned from Google Flow
-  syncedVoices: ['None', 'Aoede', 'Alnilam', 'Puck', 'Charon', 'Kore', 'Fenrir'],
-  parsedPrompts: [],
-  queue: {
-    status: 'Idle', // Idle | Queued | Running | Stopping... | Stopped | Completed
-    currentIndex: 0,
-    totalToRun: 0,
-    currentPromptText: 'Ready to start batch automation on Google Flow.',
-    stepPercent: 0
-  },
-  logs: [],
-  license: {
-    tier: 'FREE',
-    usedToday: 0,
-    dailyLimit: 10,
-    licenseKey: ''
-  },
-  settings: {
-    aspectRatio: '16:9',
-    outputsPerPrompt: '1',
-    model: 'omni-flash',
-    chainOrDuration: '10s',
-    maxImagesPerPrompt: 2,
-    autoPickImages: true,
-    autoVoice: true,
-    defaultVoice: 'None',
-    autoCharacter: true,
-    concurrency: 1,
-    agentOutputs: 2,
-    delayMin: 0,
-    delayMax: 5,
-    maxRetries: 1,
-    zoomOutFlow: true,
-    approvalPolicy: 'always-approve',
-    videoQuality: '720p',
-    imageQuality: '1K',
-    saveFolder: 'asidz-flow',
-    autoRename: true,
-    fileNaming: 'tag-timecode',
-    saasApiUrl: 'http://localhost:5050',
-    customSelectors: {
-      promptTextarea: "textarea, [contenteditable='true'], [role='textbox'], input[placeholder*='create' i]",
-      submitButton: "button[type='submit'], button[aria-label*='Generate' i], button[aria-label*='Create' i], button[aria-label*='Submit' i]",
-      fileInput: "input[type='file']",
-      characterChips: "[data-character-name], .character-chip, [aria-label*='@']"
-    }
-  }
+const IMAGE_MODELS = ['Nano Banana Pro', 'Nano Banana 2.1', 'Nano Banana 2.1 Light'];
+const VIDEO_MODELS = ['Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Omni 1.1 Flash'];
+
+const BUILTIN_VOICES = [
+  ['Achernar', 'Female', 'Soft'], ['Achird', 'Male', 'Friendly'], ['Algenib', 'Male', 'Gravelly'], ['Algieba', 'Male', 'Smooth'],
+  ['Alnilam', 'Male', 'Firm'], ['Aoede', 'Female', 'Breezy'], ['Autonoe', 'Female', 'Bright'], ['Callirrhoe', 'Female', 'Easy-going'],
+  ['Charon', 'Male', 'Informative'], ['Despina', 'Female', 'Smooth'], ['Enceladus', 'Male', 'Breathy'], ['Erinome', 'Female', 'Clear'],
+  ['Fenrir', 'Male', 'Excitable'], ['Gacrux', 'Female', 'Mature'], ['Iapetus', 'Male', 'Clear'], ['Kore', 'Female', 'Firm'],
+  ['Laomedeia', 'Female', 'Upbeat'], ['Leda', 'Female', 'Youthful'], ['Orus', 'Male', 'Firm'], ['Puck', 'Male', 'Upbeat'],
+  ['Pulcherrima', 'Female', 'Forward'], ['Rasalgethi', 'Male', 'Informative'], ['Sadachbia', 'Male', 'Lively'], ['Sadaltager', 'Male', 'Knowledgeable'],
+  ['Schedar', 'Male', 'Even'], ['Sulafat', 'Female', 'Warm'], ['Umbriel', 'Male', 'Easy-going'], ['Vindemiatrix', 'Female', 'Gentle'],
+  ['Zephyr', 'Female', 'Bright'], ['Zubenelgenubi', 'Male', 'Casual']
+];
+
+let VOICES = BUILTIN_VOICES.slice();
+let scannedVoices = [];
+
+function mergeVoices() {
+  const map = new Map(BUILTIN_VOICES.map((v) => [v[0].toLowerCase(), v]));
+  scannedVoices.forEach((n) => {
+    if (!map.has(n.toLowerCase())) map.set(n.toLowerCase(), [n, 'Flow', 'from Flow']);
+  });
+  VOICES = Array.from(map.values()).sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+const escRe = (s) => String(s).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+const hasWord = (text, word) => new RegExp(`(^|[^\\w])@?${escRe(word)}(?![\\w])`, 'i').test(text);
+
+const MODE_INFO = {
+  textToVideo: { video: true, images: false, voice: true, chars: true, hint: 'Generates cinematic videos consecutively from your prompt script.' },
+  imageToVideo: { video: true, images: true, maxKey: 'imageToVideoMaxImagesPerPrompt', maxOpts: 2, voice: false, chars: true, hint: 'Each prompt animates its own start frame (1st image = prompt 1, 2nd = prompt 2...).' },
+  componentsToVideo: { video: true, images: true, maxKey: 'componentsToVideoMaxImagesPerPrompt', maxOpts: 10, voice: true, chars: true, hint: 'Use reference images as visual ingredients for scenes and characters.' },
+  textToImage: { video: false, images: false, voice: false, chars: true, hint: 'Generate high-resolution images from text using Nano Banana 2.1.' },
+  imageToImage: { video: false, images: true, maxKey: 'imageToImageMaxImagesPerPrompt', maxOpts: 10, voice: false, chars: true, hint: 'Transform or chain-edit reference images with consecutive prompts.' },
+  agentAutomation: { video: null, images: true, maxKey: 'agentMaxImagesPerPrompt', maxOpts: 10, voice: true, chars: true, optionalImages: true, hint: 'Autonomous multi-output generation agent in Google Flow.' }
 };
 
-// DOM Elements
-const els = {
-  tabBtns: document.querySelectorAll('.tab-btn'),
-  tabPanes: document.querySelectorAll('.tab-pane'),
-  modeCards: document.querySelectorAll('.mode-card'),
-  modeHelperText: document.getElementById('modeHelperText'),
-  connDot: document.getElementById('connDot'),
-  connText: document.getElementById('connText'),
-  proBadge: document.getElementById('proBadge'),
-  quotaText: document.getElementById('quotaText'),
-  quotaBarFill: document.getElementById('quotaBarFill'),
-  openLicenseModalBtn: document.getElementById('openLicenseModalBtn'),
+/* ---------------- state ---------------- */
+let settings = { ...DEFAULTS };
+let images = [];
+let scannedChars = [];
+let logs = [];
+let unseenLogs = 0;
+let activeGroupId = null;
+let lastStatus = null;
+let flowTabId = null;
 
-  // Generation settings
-  aspectRatioSelect: document.getElementById('aspectRatioSelect'),
-  outputsPerPromptSelect: document.getElementById('outputsPerPromptSelect'),
-  modelSelect: document.getElementById('modelSelect'),
-  chainOrDurationSelect: document.getElementById('chainOrDurationSelect'),
-  chainOrDurationLabel: document.getElementById('chainOrDurationLabel'),
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
 
-  // Images block
-  imagesSectionCard: document.getElementById('imagesSectionCard'),
-  imageDropzone: document.getElementById('imageDropzone'),
-  imageFileInput: document.getElementById('imageFileInput'),
-  thumbnailStrip: document.getElementById('thumbnailStrip'),
-  maxImagesPerPrompt: document.getElementById('maxImagesPerPrompt'),
-  autoPickImagesToggle: document.getElementById('autoPickImagesToggle'),
-  removeAllImagesBtn: document.getElementById('removeAllImagesBtn'),
-
-  // Voice block
-  voiceSectionCard: document.getElementById('voiceSectionCard'),
-  autoVoiceToggle: document.getElementById('autoVoiceToggle'),
-  defaultVoiceSelect: document.getElementById('defaultVoiceSelect'),
-  syncVoicesBtn: document.getElementById('syncVoicesBtn'),
-
-  // Characters block
-  autoCharacterToggle: document.getElementById('autoCharacterToggle'),
-  scanCharactersBtn: document.getElementById('scanCharactersBtn'),
-  characterPillsContainer: document.getElementById('characterPillsContainer'),
-  manualCharInput: document.getElementById('manualCharInput'),
-  addManualCharBtn: document.getElementById('addManualCharBtn'),
-
-  // Prompts block
-  promptTotalCount: document.getElementById('promptTotalCount'),
-  promptsTextarea: document.getElementById('promptsTextarea'),
-  importTxtInput: document.getElementById('importTxtInput'),
-  importTxtBtn: document.getElementById('importTxtBtn'),
-  runFromInput: document.getElementById('runFromInput'),
-  runToInput: document.getElementById('runToInput'),
-  parsedPromptsList: document.getElementById('parsedPromptsList'),
-
-  // Execution & Queue
-  startAutoFlowBtn: document.getElementById('startAutoFlowBtn'),
-  stopAutoFlowBtn: document.getElementById('stopAutoFlowBtn'),
-  clearPromptsBtn: document.getElementById('clearPromptsBtn'),
-  queueStateText: document.getElementById('queueStateText'),
-  queueFractionText: document.getElementById('queueFractionText'),
-  queueProgressFill: document.getElementById('queueProgressFill'),
-  queueCurrentPromptText: document.getElementById('queueCurrentPromptText'),
-  queueStepPercentText: document.getElementById('queueStepPercentText'),
-
-  // Settings tab
-  concurrencySelect: document.getElementById('concurrencySelect'),
-  agentOutputsSelect: document.getElementById('agentOutputsSelect'),
-  delayMinInput: document.getElementById('delayMinInput'),
-  delayMaxInput: document.getElementById('delayMaxInput'),
-  maxRetriesInput: document.getElementById('maxRetriesInput'),
-  zoomOutFlowToggle: document.getElementById('zoomOutFlowToggle'),
-  approvalPolicySelect: document.getElementById('approvalPolicySelect'),
-  videoQualitySelect: document.getElementById('videoQualitySelect'),
-  imageQualitySelect: document.getElementById('imageQualitySelect'),
-  saveFolderInput: document.getElementById('saveFolderInput'),
-  autoRenameToggle: document.getElementById('autoRenameToggle'),
-  fileNamingSelect: document.getElementById('fileNamingSelect'),
-  openDownloadSettingsBtn: document.getElementById('openDownloadSettingsBtn'),
-  saasApiUrlInput: document.getElementById('saasApiUrlInput'),
-  licenseKeyInput: document.getElementById('licenseKeyInput'),
-  verifyLicenseBtn: document.getElementById('verifyLicenseBtn'),
-  licenseStatusNote: document.getElementById('licenseStatusNote'),
-  customSelectorsTextarea: document.getElementById('customSelectorsTextarea'),
-  saveSettingsBtn: document.getElementById('saveSettingsBtn'),
-
-  // Logs tab
-  logCountBadge: document.getElementById('logCountBadge'),
-  logsTableBody: document.getElementById('logsTableBody'),
-  exportLogsBtn: document.getElementById('exportLogsBtn'),
-  clearLogsBtn: document.getElementById('clearLogsBtn'),
-
-  // Toast & Links
-  toastPopup: document.getElementById('toastPopup'),
-  asidzHomeBtn: document.getElementById('asidzHomeBtn'),
-  asidzSupportBtn: document.getElementById('asidzSupportBtn'),
-  footerAsidzBtn: document.getElementById('footerAsidzBtn'),
-  footerSaasBtn: document.getElementById('footerSaasBtn')
-};
-
-/* ==========================================================================
-   INITIALIZATION & STORAGE SYNC
-   ========================================================================== */
-async function init() {
-  await loadSavedState();
-  bindEvents();
-  renderCharacterPills();
-  renderThumbnails();
-  updateModeUI(state.mode);
-  parseAndRenderPrompts();
-  await checkGoogleFlowTabConnection();
-  syncLicenseStatus();
-  addLog('INFO', 'AsidZ AutoFlow Side Panel initialized.');
-
-  // Auto-scan project characters on load if connected to Google Flow
-  if (state.isFlowConnected && state.scannedCharacters.length === 0) {
-    setTimeout(() => scanCharactersFromFlow(true), 600);
-  }
-
-  // Load clean creative prompts if textarea is empty (No hardcoded sample characters)
-  if (!els.promptsTextarea.value.trim()) {
-    els.promptsTextarea.value = [
-      '#shot_01 Cinematic aerial view of a futuristic neon city skyline at dusk, ultra-detailed 4K HDR in 16:9 widescreen.',
-      '#shot_02 Close-up macro portrait with dramatic cinematic lighting, photorealistic textures and shallow depth of field.',
-      '#shot_03 Extreme wide shot of an ancient mountain temple enveloped in volumetric golden mist at sunrise.'
-    ].join('\n\n');
-    parseAndRenderPrompts();
-  }
+function toast(msg, isErr) {
+  const t = $('#toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.toggle('err', !!isErr);
+  t.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.add('hidden'), isErr ? 5000 : 2500);
 }
 
-async function loadSavedState() {
-  if (!chrome?.storage?.local) return;
-  const data = await chrome.storage.local.get(['autoflowSettings', 'autoflowLicense', 'autoflowImages', 'autoflowCharacters']);
-  if (data.autoflowSettings) {
-    Object.assign(state.settings, data.autoflowSettings);
-  }
-  if (data.autoflowLicense) {
-    Object.assign(state.license, data.autoflowLicense);
-  }
-  if (Array.isArray(data.autoflowImages)) {
-    state.uploadedImages = data.autoflowImages;
-  }
-  if (Array.isArray(data.autoflowCharacters)) {
-    const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
-    state.scannedCharacters = data.autoflowCharacters.filter((c) => {
-      const bare = String(c || '').replace(/^@+/, '').toLowerCase();
-      return bare.length >= 2 && !blocked.has(bare);
-    });
-  }
-  applySettingsToDOM();
-  renderQuotaUI();
-}
-
-function applySettingsToDOM() {
-  const s = state.settings;
-  els.aspectRatioSelect.value = s.aspectRatio;
-  els.outputsPerPromptSelect.value = s.outputsPerPrompt;
-  els.modelSelect.value = s.model;
-  els.chainOrDurationSelect.value = s.chainOrDuration;
-  els.maxImagesPerPrompt.value = String(s.maxImagesPerPrompt);
-  els.autoPickImagesToggle.checked = Boolean(s.autoPickImages);
-  els.autoVoiceToggle.checked = Boolean(s.autoVoice);
-  els.defaultVoiceSelect.value = s.defaultVoice;
-  els.autoCharacterToggle.checked = Boolean(s.autoCharacter);
-  els.concurrencySelect.value = String(s.concurrency);
-  els.agentOutputsSelect.value = String(s.agentOutputs);
-  els.delayMinInput.value = s.delayMin;
-  els.delayMaxInput.value = s.delayMax;
-  els.maxRetriesInput.value = s.maxRetries;
-  els.zoomOutFlowToggle.checked = Boolean(s.zoomOutFlow);
-  if (els.approvalPolicySelect) els.approvalPolicySelect.value = s.approvalPolicy || 'always-approve';
-  els.videoQualitySelect.value = s.videoQuality;
-  els.imageQualitySelect.value = s.imageQuality;
-  els.saveFolderInput.value = s.saveFolder || 'asidz-flow';
-  els.autoRenameToggle.checked = Boolean(s.autoRename);
-  els.fileNamingSelect.value = s.fileNaming;
-  els.saasApiUrlInput.value = s.saasApiUrl || 'http://localhost:5050';
-  els.licenseKeyInput.value = state.license.licenseKey || '';
-  if (s.customSelectors) {
-    els.customSelectorsTextarea.value = JSON.stringify(s.customSelectors, null, 2);
-  }
-}
-
-async function persistSettings() {
-  let parsedSelectors = state.settings.customSelectors;
-  try {
-    parsedSelectors = JSON.parse(els.customSelectorsTextarea.value);
-  } catch (e) {
-    addLog('WARN', 'Invalid JSON in Custom Selectors; keeping previous selectors.');
-  }
-
-  state.settings = {
-    aspectRatio: els.aspectRatioSelect.value,
-    outputsPerPrompt: els.outputsPerPromptSelect.value,
-    model: els.modelSelect.value,
-    chainOrDuration: els.chainOrDurationSelect.value,
-    maxImagesPerPrompt: parseInt(els.maxImagesPerPrompt.value, 10) || 2,
-    autoPickImages: els.autoPickImagesToggle.checked,
-    autoVoice: els.autoVoiceToggle.checked,
-    defaultVoice: els.defaultVoiceSelect.value,
-    autoCharacter: els.autoCharacterToggle.checked,
-    concurrency: parseInt(els.concurrencySelect.value, 10) || 1,
-    agentOutputs: parseInt(els.agentOutputsSelect.value, 10) || 2,
-    delayMin: Math.max(0, parseInt(els.delayMinInput.value, 10) || 0),
-    delayMax: Math.max(1, parseInt(els.delayMaxInput.value, 10) || 20),
-    maxRetries: Math.max(0, parseInt(els.maxRetriesInput.value, 10) || 1),
-    zoomOutFlow: els.zoomOutFlowToggle.checked,
-    approvalPolicy: els.approvalPolicySelect ? els.approvalPolicySelect.value : 'always-approve',
-    videoQuality: els.videoQualitySelect.value,
-    imageQuality: els.imageQualitySelect.value,
-    saveFolder: els.saveFolderInput.value.trim() || 'asidz-flow',
-    autoRename: els.autoRenameToggle.checked,
-    fileNaming: els.fileNamingSelect.value,
-    saasApiUrl: els.saasApiUrlInput.value.trim() || 'http://localhost:5050',
-    customSelectors: parsedSelectors
+/* ---------------- storage ---------------- */
+async function loadAll() {
+  const st = await chrome.storage.local.get([
+    SETTINGS_KEY, FORM_KEY, CHARS_KEY, SELECTORS_KEY, VOICES_KEY,
+    'aws_settings', 'aws_form', 'aws_scanned_characters', 'aws_custom_selectors', 'aws_scanned_voices',
+    'autoflowCharacters', 'autoflowSettings'
+  ]);
+  
+  settings = {
+    ...DEFAULTS,
+    ...(st[SETTINGS_KEY] || st.aws_settings || st.autoflowSettings || {})
   };
+  if (!Array.isArray(settings.defaultCharacters)) settings.defaultCharacters = [];
 
-  if (chrome?.storage?.local) {
-    await chrome.storage.local.set({ autoflowSettings: state.settings });
-  }
+  const rawChars = st[CHARS_KEY] || st.aws_scanned_characters || st.autoflowCharacters || [];
+  const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+  scannedChars = (Array.isArray(rawChars) ? rawChars : [])
+    .map((c) => String(c).replace(/^@+/, '').trim())
+    .filter((c) => c && c.length >= 2 && !blocked.has(c.toLowerCase()));
+
+  scannedVoices = Array.isArray(st[VOICES_KEY] || st.aws_scanned_voices) ? st[VOICES_KEY] || st.aws_scanned_voices : [];
+  mergeVoices();
+
+  const form = st[FORM_KEY] || st.aws_form || {};
+  $('#prompts').value = form.prompts || '';
+  $('#customSelectors').value = st[SELECTORS_KEY] || st.aws_custom_selectors || '';
 }
 
-/* ==========================================================================
-   PROMPT PARSER & AUTO-ASSET MATCHING (#tag, IMAGES, @CHARACTERS, VOICES)
-   ========================================================================= */
-function parseAndRenderPrompts() {
-  const raw = els.promptsTextarea.value || '';
-  const blocks = raw
-    .split(/\n\s*\n/)
-    .map((b) => b.trim())
-    .filter(Boolean);
-
-  const maxImgs = parseInt(els.maxImagesPerPrompt.value, 10) || 2;
-  const autoPickImg = els.autoPickImagesToggle.checked;
-  const autoChar = els.autoCharacterToggle.checked;
-  const autoVoice = els.autoVoiceToggle.checked;
-
-  state.parsedPrompts = blocks.map((block, idx) => {
-    let customTag = null;
-    let cleanPrompt = block;
-
-    const tagMatch = block.match(/^#([A-Za-z0-9_-]+)\s+([\s\S]+)$/);
-    if (tagMatch) {
-      customTag = tagMatch[1];
-      cleanPrompt = tagMatch[2].trim();
-    }
-
-    const matchedImages = [];
-    if (autoPickImg && state.uploadedImages.length > 0) {
-      for (const img of state.uploadedImages) {
-        if (matchedImages.length >= maxImgs) break;
-        const normalizedPrompt = cleanPrompt.toLowerCase();
-        const stem = img.baseName.toLowerCase();
-        if (stem && normalizedPrompt.includes(stem)) {
-          matchedImages.push(img);
-        }
-      }
-    }
-
-    const matchedCharacters = [];
-    if (autoChar && state.scannedCharacters.length > 0) {
-      for (const charTag of state.scannedCharacters) {
-        const bareName = charTag.replace(/^@+/, '');
-        const regex = new RegExp(`(@?\\b${bareName}\\b)`, 'i');
-        if (regex.test(cleanPrompt)) {
-          matchedCharacters.push(charTag);
-          // Automatically tag the character name with @ in the cleanPrompt if not already prefixed
-          const replaceRegex = new RegExp(`(?<!@)\\b${bareName}\\b`, 'gi');
-          cleanPrompt = cleanPrompt.replace(replaceRegex, `@${bareName}`);
-        }
-      }
-    }
-
-    const matchedVoices = [];
-    if (autoVoice) {
-      for (const voice of state.syncedVoices) {
-        if (voice === 'None') continue;
-        const vRegex = new RegExp(`\\b${voice}\\b`, 'i');
-        if (vRegex.test(cleanPrompt)) {
-          matchedVoices.push(voice);
-        }
-      }
-      if (matchedVoices.length === 0 && els.defaultVoiceSelect.value !== 'None') {
-        matchedVoices.push(els.defaultVoiceSelect.value);
-      }
-    }
-
-    return {
-      index: idx + 1,
-      tag: customTag || `prompt_${String(idx + 1).padStart(2, '0')}`,
-      rawText: block,
-      cleanPrompt,
-      matchedImages,
-      matchedCharacters,
-      matchedVoices
-    };
-  });
-
-  const count = state.parsedPrompts.length;
-  els.promptTotalCount.textContent = String(count);
-  els.runToInput.max = String(Math.max(1, count));
-  if (parseInt(els.runToInput.value, 10) <= 1 || parseInt(els.runToInput.value, 10) > count) {
-    els.runToInput.value = String(Math.max(1, count));
-  }
-
-  renderParsedPromptCards();
-}
-
-function renderParsedPromptCards() {
-  els.parsedPromptsList.innerHTML = '';
-  state.parsedPrompts.forEach((item) => {
-    const card = document.createElement('div');
-    card.className = 'parsed-prompt-card';
-    if (state.queue.status === 'Running' && state.queue.currentIndex === item.index) {
-      card.classList.add('running');
-    }
-
-    const top = document.createElement('div');
-    top.className = 'parsed-prompt-top';
-
-    const badge = document.createElement('span');
-    badge.className = 'prompt-num-badge';
-    badge.textContent = String(item.index);
-
-    const preview = document.createElement('span');
-    preview.className = 'prompt-preview-text';
-    preview.textContent = item.cleanPrompt;
-
-    top.appendChild(badge);
-    top.appendChild(preview);
-    card.appendChild(top);
-
-    const tagsRow = document.createElement('div');
-    tagsRow.className = 'parsed-prompt-tags';
-
-    if (item.rawText.startsWith('#')) {
-      const tChip = document.createElement('span');
-      tChip.className = 'asset-chip';
-      tChip.textContent = `#${item.tag}`;
-      tagsRow.appendChild(tChip);
-    }
-
-    if (item.matchedImages.length > 0) {
-      const imgChip = document.createElement('span');
-      imgChip.className = 'asset-chip';
-      const names = item.matchedImages.map((i) => i.baseName).join(', ');
-      imgChip.textContent = `${item.matchedImages.length} img: ${names}`;
-      tagsRow.appendChild(imgChip);
-    }
-
-    if (item.matchedCharacters.length > 0) {
-      const charChip = document.createElement('span');
-      charChip.className = 'asset-chip';
-      charChip.textContent = item.matchedCharacters.join(', ');
-      tagsRow.appendChild(charChip);
-    }
-
-    if (item.matchedVoices.length > 0) {
-      const voiceChip = document.createElement('span');
-      voiceChip.className = 'asset-chip';
-      voiceChip.textContent = `🔊 ${item.matchedVoices.join(', ')}`;
-      tagsRow.appendChild(voiceChip);
-    }
-
-    if (tagsRow.children.length > 0) {
-      card.appendChild(tagsRow);
-    }
-
-    els.parsedPromptsList.appendChild(card);
-  });
-}
-
-/* ==========================================================================
-   IMAGE DROPZONE & THUMBNAIL MANAGEMENT
-   ========================================================================== */
-function handleImageFiles(fileList) {
-  const files = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
-  if (!files.length) return;
-
-  files.forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const baseName = file.name.replace(/\.[^/.]+$/, '');
-      state.uploadedImages.push({
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        name: file.name,
-        baseName,
-        mimeType: file.type,
-        dataUrl: e.target.result
-      });
-      if (chrome?.storage?.local) {
-        await chrome.storage.local.set({ autoflowImages: state.uploadedImages });
-      }
-      renderThumbnails();
-      parseAndRenderPrompts();
-      addLog('INFO', `Loaded reference image: ${file.name} (token: "${baseName}")`);
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function renderThumbnails() {
-  els.thumbnailStrip.innerHTML = '';
-  state.uploadedImages.forEach((img) => {
-    const item = document.createElement('div');
-    item.className = 'thumb-item';
-
-    const thumb = document.createElement('img');
-    thumb.src = img.dataUrl;
-    thumb.alt = img.name;
-
-    const label = document.createElement('span');
-    label.textContent = img.name;
-
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'thumb-remove';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'Remove image';
-    removeBtn.addEventListener('click', async () => {
-      state.uploadedImages = state.uploadedImages.filter((i) => i.id !== img.id);
-      if (chrome?.storage?.local) {
-        await chrome.storage.local.set({ autoflowImages: state.uploadedImages });
-      }
-      renderThumbnails();
-      parseAndRenderPrompts();
+let saveTimer = null;
+function saveSettings() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    chrome.storage.local.set({
+      [SETTINGS_KEY]: settings,
+      aws_settings: settings
     });
+  }, 150);
+}
 
-    item.appendChild(thumb);
-    item.appendChild(label);
-    item.appendChild(removeBtn);
-    els.thumbnailStrip.appendChild(item);
+function saveForm() {
+  chrome.storage.local.set({
+    [FORM_KEY]: { prompts: $('#prompts').value },
+    aws_form: { prompts: $('#prompts').value }
   });
 }
 
-/* ==========================================================================
-   CHARACTER PILLS & FLOW SYNC (NO HARDCODED CHARACTERS)
-   ========================================================================== */
-function renderCharacterPills() {
-  els.characterPillsContainer.innerHTML = '';
-  if (!state.scannedCharacters || state.scannedCharacters.length === 0) {
-    const hint = document.createElement('span');
-    hint.className = 'helper-note';
-    hint.id = 'noCharHint';
-    hint.textContent = 'No characters added or scanned yet. Type a name above or click "Scan characters from Flow".';
-    els.characterPillsContainer.appendChild(hint);
+function numeric(key) {
+  return typeof DEFAULTS[key] === 'number';
+}
+
+function bindSettings() {
+  $$('[data-setting]').forEach((el) => {
+    const key = el.dataset.setting;
+    const v = settings[key];
+    if (el.type === 'checkbox') el.checked = !!v;
+    else el.value = v == null ? '' : String(v);
+
+    if (el.tagName === 'SELECT' && el.value !== String(v) && el.options.length) {
+      el.value = String(DEFAULTS[key]);
+      settings[key] = numeric(key) ? Number(el.value) : el.value;
+    }
+    if (el._bound) return;
+    el._bound = true;
+    el.addEventListener('change', () => {
+      const k = el.dataset.setting;
+      let val = el.type === 'checkbox' ? el.checked : el.value;
+      if (numeric(k)) val = Number(val) || 0;
+      settings[k] = val;
+      if (k === 'promptDelaySecondsMax' && settings.promptDelaySecondsMax < settings.promptDelaySecondsMin) {
+        settings.promptDelaySecondsMin = settings.promptDelaySecondsMax;
+      }
+      saveSettings();
+      refreshUI();
+    });
+  });
+}
+
+/* ---------------- mode UI ---------------- */
+function currentInfo() {
+  return MODE_INFO[settings.mode] || MODE_INFO.textToVideo;
+}
+
+function isVideoMode() {
+  const info = currentInfo();
+  if (settings.mode === 'agentAutomation') return settings.agentType === 'agentAutomationToVideo';
+  return !!info.video;
+}
+
+function refreshUI() {
+  const info = currentInfo();
+  $$('#modes .chip').forEach((c) => c.classList.toggle('active', c.dataset.mode === settings.mode));
+  $('#modeHint').textContent = info.hint;
+  $('#agentTypeRow').classList.toggle('hidden', settings.mode !== 'agentAutomation');
+  $$('#agentTypeRow .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.agent === settings.agentType));
+  const video = isVideoMode();
+  $$('.video-only').forEach((e) => e.classList.toggle('hidden', !video));
+  $$('.image-only').forEach((e) => e.classList.toggle('hidden', video));
+  $('#chainHint').classList.toggle('hidden', !String(video ? settings.defaultVideoOption : settings.defaultImageOption).includes('concat'));
+  $('#imagesCard').classList.toggle('hidden', !info.images);
+  $('#voiceCard').classList.toggle('hidden', !(info.voice && (settings.mode !== 'agentAutomation' || video)));
+  $('#charCard').classList.toggle('hidden', !info.chars);
+
+  const oc = $('#q_outputCount');
+  oc.dataset.setting = settings.mode === 'agentAutomation' ? 'agentOutputCount' : 'outputCount';
+  oc.value = String(settings[oc.dataset.setting]);
+
+  if (info.images) {
+    const sel = $('#maxImagesPerPrompt');
+    const cur = settings[info.maxKey] || 1;
+    sel.innerHTML = '';
+    for (let i = 1; i <= info.maxOpts; i++) sel.add(new Option(String(i), String(i)));
+    sel.value = String(Math.min(cur, info.maxOpts));
+    const omni = String(settings.model).toLowerCase().includes('omni');
+    $('#imageInput').accept = (settings.mode === 'componentsToVideo' || settings.mode === 'agentAutomation') && omni ? 'image/*,video/*' : 'image/*';
+  }
+  $('#autoAddVoiceBySpeaker').checked = !!settings.autoAddVoiceBySpeaker;
+  $('#defaultSpeaker').disabled = !!settings.autoAddVoiceBySpeaker;
+  renderChars();
+  renderThumbs();
+  renderPrompts();
+}
+
+/* ---------------- prompts logic ---------------- */
+const parsePrompts = (t) => (t ? t.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean) : []);
+
+function promptOption(i, total) {
+  const def = isVideoMode() ? settings.defaultVideoOption : settings.defaultImageOption;
+  if (total > 0 && i === total - 1 && def.includes('-concat')) return def.split('-concat')[0];
+  return def;
+}
+const isConcat = (i, total) => promptOption(i, total).includes('concat');
+const isAfterConcat = (i, total) => i > 0 && isConcat(i - 1, total);
+const stem = (n) => String(n || '').replace(/\.[^/.]+$/, '');
+
+function imagesPerPrompt(prompts) {
+  const info = currentInfo();
+  if (!info.images || !images.length) return prompts.map(() => []);
+  const max = Number(settings[info.maxKey] || 1);
+  const out = [];
+  let ptr = 0;
+  for (let i = 0; i < prompts.length; i++) {
+    if (isAfterConcat(i, prompts.length)) {
+      out.push([]);
+      continue;
+    }
+    const p = prompts[i].toLowerCase();
+    let picked = [];
+    if (settings.autoAddCharacterImages) {
+      picked = images.filter((im) => {
+        const s = stem(im.name).toLowerCase();
+        return s && p.includes(s);
+      }).slice(0, max);
+    } else if (settings.mode === 'imageToVideo') {
+      picked = images.slice(ptr, ptr + max);
+      ptr += max;
+    } else {
+      const n = Math.min(max, images.length);
+      const seen = new Set();
+      for (let k = 0; k < n; k++) {
+        const im = images[ptr % images.length];
+        ptr++;
+        if (!seen.has(im.id)) {
+          seen.add(im.id);
+          picked.push(im);
+        }
+      }
+    }
+    out.push(picked);
+  }
+  return out;
+}
+
+function speakerFor(prompt) {
+  if (settings.autoAddVoiceBySpeaker) {
+    const v = VOICES.slice().sort((a, b) => b[0].length - a[0].length).find(([n]) => hasWord(prompt, n));
+    if (v) return v[0];
+  }
+  return settings.defaultSpeaker && settings.defaultSpeaker !== 'none' ? settings.defaultSpeaker : null;
+}
+
+function charactersFor(prompt) {
+  const found = [];
+  const add = (c) => {
+    if (c && !found.some((x) => x.toLowerCase() === c.toLowerCase())) found.push(c);
+  };
+  const byLen = scannedChars.slice().sort((a, b) => b.length - a.length);
+  let work = prompt;
+  byLen.forEach((c) => {
+    const re = new RegExp(`@${escRe(c)}(?![\\w])`, 'gi');
+    if (re.test(work)) {
+      add(c);
+      work = work.replace(re, ' ');
+    }
+  });
+  if (settings.enableCharacterControl) {
+    byLen.forEach((c) => {
+      const re = new RegExp(`(^|[^\\w@])${escRe(c)}(?![\\w])`, 'gi');
+      if (re.test(work)) {
+        add(c);
+        work = work.replace(re, '$1 ');
+      }
+    });
+    const isVoice = (w) => VOICES.some(([n]) => n.toLowerCase() === w.toLowerCase());
+    (prompt.match(/(^|\s)@([A-Za-z0-9_][\w-]{0,39})/g) || []).forEach((m) => {
+      const w = m.trim().slice(1);
+      if (!isVoice(w) && !found.some((x) => w.toLowerCase().startsWith(x.toLowerCase()))) add(w);
+    });
+  }
+  settings.defaultCharacters.forEach(add);
+  return found.length ? found : null;
+}
+
+function renderPrompts() {
+  const prompts = parsePrompts($('#prompts').value);
+  $('#promptCount').textContent = `${prompts.length}`;
+  const from = $('#rangeFrom'),
+    to = $('#rangeTo');
+  from.max = to.max = Math.max(1, prompts.length);
+  if (Number(to.value) > prompts.length || Number(to.value) < 1 || to._auto !== false)
+    to.value = Math.max(1, prompts.length);
+  if (Number(from.value) > prompts.length) from.value = 1;
+
+  const info = currentInfo();
+  const per = imagesPerPrompt(prompts);
+  const list = $('#promptList');
+  list.innerHTML = '';
+
+  prompts.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'p-row';
+    row.dataset.idx = String(i + 1);
+    const tags = [];
+    if (info.images && per[i] && per[i].length)
+      tags.push(`<span class="tag img">${per[i].length} img: ${per[i].map((x) => escapeHtml(stem(x.name))).join(', ')}</span>`);
+    if (info.images && !info.optionalImages && !isAfterConcat(i, prompts.length) && (!per[i] || !per[i].length))
+      tags.push('<span class="tag err">no image</span>');
+    if (isAfterConcat(i, prompts.length)) tags.push('<span class="tag chain">chain edit</span>');
+    if (info.voice && (settings.mode !== 'agentAutomation' || isVideoMode())) {
+      const sp = speakerFor(p);
+      if (sp) tags.push(`<span class="tag voice">voice: ${sp}</span>`);
+    }
+    const ch = charactersFor(p);
+    if (ch) tags.push(`<span class="tag char">@${ch.map(escapeHtml).join(', @')}</span>`);
+    row.innerHTML = `<div class="p-num">${i + 1}</div><div class="p-body"><div class="p-text" title="${escapeHtml(p)}">${escapeHtml(p)}</div><div class="p-meta">${tags.join('')}</div></div>`;
+    list.appendChild(row);
+  });
+  if (lastStatus) applyStatusToRows(lastStatus);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ---------------- images ---------------- */
+function readFile(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+}
+
+async function addFiles(files) {
+  for (const f of files) {
+    if (!/^image\/|^video\//.test(f.type)) continue;
+    const base64 = await readFile(f);
+    images.push({
+      id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: f.name,
+      base64,
+      type: f.type
+    });
+  }
+  refreshUI();
+}
+
+function renderThumbs() {
+  const box = $('#thumbs');
+  box.innerHTML = '';
+  $('#imgCount').textContent = images.length ? `(${images.length})` : '';
+  images.forEach((im) => {
+    const d = document.createElement('div');
+    d.className = 'thumb';
+    d.innerHTML =
+      (im.type.startsWith('video/')
+        ? `<video src="${im.base64}" muted></video>`
+        : `<img src="${im.base64}" alt="">`) +
+      `<span class="nm" title="${escapeHtml(im.name)}">${escapeHtml(im.name)}</span><button class="x" title="Remove">&times;</button>`;
+    d.querySelector('.x').addEventListener('click', () => {
+      images = images.filter((x) => x.id !== im.id);
+      refreshUI();
+    });
+    box.appendChild(d);
+  });
+}
+
+/* ---------------- characters ---------------- */
+function renderChars() {
+  const box = $('#charList');
+  box.innerHTML = '';
+  if (!scannedChars.length) {
+    box.innerHTML = '<span class="muted small">No characters scanned yet. Open your Flow project and click Scan.</span>';
     return;
   }
-
-  state.scannedCharacters.forEach((charTag) => {
-    const pill = document.createElement('span');
-    pill.className = 'char-pill';
-    pill.dataset.char = charTag;
-    pill.title = 'Auto mode: added when its name is in the prompt. Click to insert.';
-
-    const textSpan = document.createElement('span');
-    textSpan.textContent = charTag;
-    textSpan.addEventListener('click', () => {
-      const start = els.promptsTextarea.selectionStart || els.promptsTextarea.value.length;
-      const before = els.promptsTextarea.value.slice(0, start);
-      const after = els.promptsTextarea.value.slice(start);
-      els.promptsTextarea.value = `${before}${charTag} ${after}`;
-      parseAndRenderPrompts();
-    });
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'char-pill-del';
-    delBtn.textContent = '×';
-    delBtn.title = `Remove ${charTag}`;
-    delBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      state.scannedCharacters = state.scannedCharacters.filter((c) => c !== charTag);
-      if (chrome?.storage?.local) {
-        await chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
-      }
-      renderCharacterPills();
-      parseAndRenderPrompts();
-      addLog('INFO', `Removed character: ${charTag}`);
-    });
-
-    pill.appendChild(textSpan);
-    pill.appendChild(delBtn);
-    els.characterPillsContainer.appendChild(pill);
-  });
-}
-
-function handleAddManualCharacter() {
-  const val = (els.manualCharInput?.value || '').trim();
-  if (!val) return;
-  const cleanName = val.replace(/^@+/, '').replace(/\s+/g, '_');
-  if (!cleanName) return;
-  const tag = `@${cleanName}`;
-  if (!state.scannedCharacters.includes(tag)) {
-    state.scannedCharacters.push(tag);
-    if (chrome?.storage?.local) {
-      chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
-    }
-    renderCharacterPills();
-    parseAndRenderPrompts();
-    showToast(`Added character ${tag}`);
-    addLog('INFO', `Added character: ${tag}`);
-  }
-  if (els.manualCharInput) els.manualCharInput.value = '';
-}
-
-async function scanCharactersFromFlow(silent = false) {
-  if (!silent) addLog('CDP', 'Scanning characters from active Google Flow project canvas...');
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: 'SCAN_FLOW_CHARACTERS' });
-    if (resp?.ok && Array.isArray(resp.characters) && resp.characters.length > 0) {
-      const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
-      const validChars = resp.characters.filter((c) => {
-        const bare = String(c || '').replace(/^@+/, '').toLowerCase();
-        return bare.length >= 2 && !blocked.has(bare);
-      });
-      if (validChars.length > 0) {
-        state.scannedCharacters = Array.from(new Set([...state.scannedCharacters, ...validChars]));
-        if (chrome?.storage?.local) {
-          await chrome.storage.local.set({ autoflowCharacters: state.scannedCharacters });
-        }
-        renderCharacterPills();
-        parseAndRenderPrompts();
-        if (!silent) showToast(`Scanned ${validChars.length} character(s) from Google Flow.`);
-        addLog('INFO', `Characters synced: ${state.scannedCharacters.join(', ')}`);
+  scannedChars.forEach((c) => {
+    const b = document.createElement('span');
+    b.className = 'char' + (settings.defaultCharacters.includes(c) ? ' active' : '');
+    b.textContent = '@' + c;
+    b.title = settings.enableCharacterControl
+      ? 'Auto mode: included automatically when referenced in the prompt'
+      : 'Click to always include this character';
+    b.addEventListener('click', () => {
+      if (settings.enableCharacterControl) {
+        // In auto mode, clicking character appends @character to the active prompt textarea
+        const p = $('#prompts');
+        p.value = p.value ? `${p.value.trim()} @${c}\n` : `@${c} `;
+        saveForm();
+        renderPrompts();
         return;
       }
-    }
-    if (!silent) {
-      showToast('No characters detected in current Flow project. Open your Flow project or add manually.');
-      addLog('WARN', resp?.error || 'No character chips found in Flow canvas.');
-    }
-  } catch (err) {
-    if (!silent) addLog('ERROR', `Character scan error: ${err.message}`);
-  }
-}
-
-async function syncVoicesFromFlow() {
-  addLog('CDP', 'Syncing voice library from Google Flow...');
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: 'SYNC_FLOW_VOICES' });
-    const voices = resp?.voices?.length
-      ? resp.voices
-      : ['None', 'Aoede', 'Alnilam', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Orus', 'Zephyr'];
-    state.syncedVoices = voices;
-    els.defaultVoiceSelect.innerHTML = voices
-      .map((v) => `<option value="${v}">${v}</option>`)
-      .join('');
-    showToast(`${voices.length - 1} voices synced from Google Flow.`);
-    addLog('INFO', `Synced ${voices.length - 1} voices from Flow library.`);
-    parseAndRenderPrompts();
-  } catch (err) {
-    addLog('ERROR', `Voice sync failed: ${err.message}`);
-  }
-}
-
-/* ==========================================================================
-   CONNECTION & SAAS LICENSE VERIFICATION
-   ========================================================================== */
-async function checkGoogleFlowTabConnection() {
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: 'CHECK_FLOW_CONNECTION' });
-    state.isFlowConnected = Boolean(resp?.connected);
-    state.connectedTabId = resp?.tabId || null;
-    if (state.isFlowConnected) {
-      els.connDot.classList.remove('disconnected');
-      els.connDot.classList.add('connected');
-      els.connText.textContent = 'Connected to Google Flow';
-    } else {
-      els.connDot.classList.remove('connected');
-      els.connDot.classList.add('disconnected');
-      els.connText.textContent = 'Open flow.google.com tab to connect';
-    }
-  } catch (_) {
-    els.connDot.classList.add('disconnected');
-    els.connText.textContent = 'Extension Service Worker standby';
-  }
-}
-
-async function syncLicenseStatus() {
-  try {
-    const resp = await chrome.runtime.sendMessage({
-      type: 'VERIFY_SAAS_LICENSE',
-      licenseKey: els.licenseKeyInput.value.trim() || state.license.licenseKey,
-      saasApiUrl: state.settings.saasApiUrl
+      const i = settings.defaultCharacters.indexOf(c);
+      if (i >= 0) settings.defaultCharacters.splice(i, 1);
+      else settings.defaultCharacters.push(c);
+      saveSettings();
+      refreshUI();
     });
-    if (resp?.license) {
-      state.license = resp.license;
-      renderQuotaUI();
+    box.appendChild(b);
+  });
+}
+
+/* ---------------- Flow tab connection ---------------- */
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs && tabs[0];
+}
+
+const isFlowUrl = (u) => !!u && (u.includes('flow.google.com') || u.includes('labs.google/fx'));
+
+function sendToTab(tabId, msg) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, msg, (res) => {
+      const le = chrome.runtime.lastError;
+      if (le)
+        reject(
+          new Error(
+            /Receiving end|establish connection/i.test(le.message || '')
+              ? 'Flow page is not connected. Reload the Google Flow tab (F5) and try again.'
+              : le.message
+          )
+        );
+      else resolve(res);
+    });
+  });
+}
+
+async function checkPage() {
+  const tab = await getActiveTab();
+  const box = $('#pageStatus'),
+    txt = $('#pageStatusText'),
+    btn = $('#openFlowBtn');
+  if (tab && isFlowUrl(tab.url)) {
+    flowTabId = tab.id;
+    try {
+      await sendToTab(tab.id, { type: 'PING' });
+      box.classList.add('on');
+      box.classList.remove('off');
+      txt.textContent = 'Connected to Google Flow';
+      btn.classList.add('hidden');
+      sendToTab(tab.id, { type: 'GET_QUEUE_STATE' }).catch(() => {});
+    } catch (_) {
+      box.classList.remove('on');
+      box.classList.add('off');
+      txt.textContent = 'Flow tab found but not connected';
+      btn.textContent = 'Reload Flow tab';
+      btn.dataset.act = 'reload';
+      btn.classList.remove('hidden');
     }
-  } catch (err) {
-    addLog('WARN', `SaaS check offline; using cached tier (${state.license.tier}).`);
-  }
-}
-
-function renderQuotaUI() {
-  const isPro = state.license.tier === 'PRO';
-  els.proBadge.textContent = isPro ? 'PRO' : 'FREE';
-  els.proBadge.className = `tier-pill ${isPro ? 'pro' : 'free'}`;
-
-  if (isPro) {
-    els.quotaText.textContent = `PRO Unlimited (${state.license.usedToday} generated today)`;
-    els.quotaBarFill.style.width = '100%';
-    els.licenseStatusNote.innerHTML = `✅ Active Pro License: <code>${state.license.licenseKey || 'PRO-ACTIVE'}</code>`;
   } else {
-    const used = state.license.usedToday || 0;
-    const limit = state.license.dailyLimit || 10;
-    const pct = Math.min(100, Math.round((used / limit) * 100));
-    els.quotaText.textContent = `Quota: ${used} / ${limit} daily generations`;
-    els.quotaBarFill.style.width = `${pct}%`;
+    flowTabId = null;
+    box.classList.remove('on');
+    box.classList.add('off');
+    txt.textContent = 'Open Google Flow in this tab to start';
+    btn.textContent = 'Open Google Flow';
+    btn.dataset.act = 'open';
+    btn.classList.remove('hidden');
   }
 }
 
-/* ==========================================================================
-   BATCH EXECUTION (START / STOP / PROGRESS)
-   ========================================================================== */
-async function startBatchAutoFlow() {
-  await persistSettings();
-  if (state.settings.autoCharacter && state.scannedCharacters.length === 0) {
-    await scanCharactersFromFlow(true);
+/* ---------------- start / stop ---------------- */
+async function sendImages(tabId, list) {
+  for (const im of list) {
+    const data = { base64: im.base64, name: im.name };
+    const json = JSON.stringify(data);
+    const total = Math.ceil(json.length / CHUNK);
+    if (total <= 1) await sendToTab(tabId, { type: 'PREPARE_IMAGE', id: im.id, data });
+    else
+      for (let k = 0; k < total; k++)
+        await sendToTab(tabId, {
+          type: 'PREPARE_IMAGE_CHUNK',
+          id: im.id,
+          chunk: json.slice(k * CHUNK, (k + 1) * CHUNK),
+          chunkIndex: k,
+          totalChunks: total
+        });
   }
-  parseAndRenderPrompts();
+}
 
-  if (state.parsedPrompts.length === 0) {
-    showToast('Please enter at least 1 prompt before starting.');
-    return;
+async function start() {
+  const prompts = parsePrompts($('#prompts').value);
+  if (!prompts.length) return toast('Add at least one prompt first.', true);
+  const tab = await getActiveTab();
+  if (!tab || !isFlowUrl(tab.url))
+    return toast('Open Google Flow (flow.google.com) in the current tab first.', true);
+
+  const info = currentInfo();
+  const total = prompts.length;
+  const anyConcat = prompts.some((_, i) => isConcat(i, total));
+  const per = imagesPerPrompt(prompts);
+  const mode = settings.mode === 'agentAutomation' ? settings.agentType : settings.mode;
+  const video = isVideoMode();
+
+  if (info.images && !info.optionalImages) {
+    const missing = prompts
+      .map((_, i) => (!isAfterConcat(i, total) && (!per[i] || !per[i].length) ? i + 1 : null))
+      .filter(Boolean);
+    const allowNoImg =
+      settings.mode === 'componentsToVideo' &&
+      (settings.enableCharacterControl || settings.defaultCharacters.length);
+    if (missing.length && !allowNoImg)
+      return toast(
+        `These prompts have no image: ${missing.join(', ')}. Add reference images first.`,
+        true
+      );
   }
 
-  const fromIdx = Math.max(1, parseInt(els.runFromInput.value, 10) || 1);
-  const toIdx = Math.min(state.parsedPrompts.length, parseInt(els.runToInput.value, 10) || state.parsedPrompts.length);
-  const subset = state.parsedPrompts.filter((p) => p.index >= fromIdx && p.index <= toIdx);
+  const outputCount = anyConcat ? 1 : Number(settings.mode === 'agentAutomation' ? settings.agentOutputCount : settings.outputCount);
+  const concurrent = anyConcat || settings.mode === 'agentAutomation' ? 1 : Number(settings.concurrentPrompts);
+  
+  const payloads = prompts.map((p, i) => ({
+    prompt: p,
+    mode,
+    images: info.images ? per[i] : [],
+    speaker: info.voice && (settings.mode !== 'agentAutomation' || video) ? speakerFor(p) : null,
+    characters: charactersFor(p),
+    aspectRatio: settings.aspectRatio,
+    outputCount,
+    model: video ? settings.model : settings.imageModel,
+    videoOption: video ? promptOption(i, total) : undefined,
+    promptIndex: i + 1,
+    autoDownloadResourceQuality: video ? settings.autoDownloadVideoQuality : settings.autoDownloadImageQuality,
+    isConcat: isConcat(i, total),
+    maxRetries: Number(settings.maxRetries),
+    autoChangeFileName: !!settings.autoChangeFileName,
+    fileNamingSystem: settings.fileNamingSystem || 'prompt_tag',
+    folderName: settings.folderName || 'asidz-flow'
+  }));
 
-  if (subset.length === 0) {
-    showToast('Invalid Run range selected.');
-    return;
-  }
+  const from = Math.max(1, Number($('#rangeFrom').value) || 1);
+  const to = Math.min(total, Number($('#rangeTo').value) || total);
+  if (from > to) return toast('"Run from" must be smaller than "to".', true);
+  const slice = payloads.slice(from - 1, to);
 
-  els.startAutoFlowBtn.disabled = true;
-  showToast(`Started ${subset.length} prompt(s). Keep Google Flow canvas open.`);
-  addLog('CDP', `Starting AutoFlow queue (${subset.length} prompts) in mode "${state.mode}"...`);
+  const used = new Map();
+  const finalPayloads = slice.map((p) => {
+    const ids = (p.images || []).map((im) => {
+      used.set(im.id, im);
+      return im.id;
+    });
+    const { images: _drop, ...rest } = p;
+    return ids.length ? { ...rest, imageIds: ids } : rest;
+  });
 
+  $('#startBtn').disabled = true;
   try {
-    const resp = await chrome.runtime.sendMessage({
-      type: 'START_AUTOFLOW_BATCH',
-      payload: {
-        mode: state.mode,
-        prompts: subset,
-        settings: state.settings
+    await sendImages(tab.id, Array.from(used.values()));
+    const groupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const res = await sendToTab(tab.id, {
+      type: 'AUTO_FILL_FLOW',
+      payloads: finalPayloads,
+      groupId,
+      concurrentPrompts: concurrent,
+      promptDelaySecondsMin: Number(settings.promptDelaySecondsMin),
+      promptDelaySecondsMax: Number(settings.promptDelaySecondsMax)
+    });
+    if (!res || !res.success) throw new Error((res && res.error) || 'Could not start');
+    activeGroupId = res.groupId || groupId;
+    lastStatus = null;
+    $$('.p-row').forEach((r) => r.classList.remove('done', 'fail', 'running'));
+    toast(`Started ${finalPayloads.length} prompt(s). Keep Google Flow canvas open.`);
+    $('#stopBtn').classList.remove('hidden');
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    $('#startBtn').disabled = false;
+  }
+}
+
+async function stop() {
+  if (!activeGroupId) return;
+  const tab = await getActiveTab();
+  const tabId = tab && isFlowUrl(tab.url) ? tab.id : flowTabId;
+  if (!tabId) return toast('Flow tab not found', true);
+  try {
+    await sendToTab(tabId, { type: 'CANCEL_PROMPT_GROUP', groupId: activeGroupId });
+    toast('Stopping after the current step...');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* ---------------- status updates ---------------- */
+function applyStatusToRows(d) {
+  const map = {};
+  (d.results || []).forEach((r) => {
+    map[r.promptIndex] = r;
+  });
+  const running = d.currentPromptIndex != null && d.promptIndices ? d.promptIndices[d.currentPromptIndex] : null;
+  $$('.p-row').forEach((row) => {
+    const n = Number(row.dataset.idx);
+    if (!d.promptIndices || !d.promptIndices.includes(n)) return;
+    row.classList.remove('done', 'fail', 'running');
+    const r = map[n];
+    if (r) {
+      if (r.success && r.downloadComplete) row.classList.add('done');
+      else if (!r.success) row.classList.add('fail');
+      else row.classList.add('running');
+    }
+    if (running === n) row.classList.add('running');
+  });
+}
+
+function onGroupStatus(d) {
+  if (!d) return;
+  if (activeGroupId && d.id !== activeGroupId && d.status !== 'running') return;
+  activeGroupId = d.id;
+  lastStatus = d;
+  $('#queueEmpty').classList.add('hidden');
+  $('#queueBox').classList.remove('hidden');
+  const done = (d.results || []).filter((r) => r.downloadComplete || !r.success).length;
+  const pct = d.totalCount ? Math.round((done / d.totalCount) * 100) : 0;
+  $('#queueBar').style.width = pct + '%';
+  $('#queueCount').textContent = `${done}/${d.totalCount} prompts`;
+  const labels = {
+    queued: 'Queued',
+    running: d.isCancelling ? 'Stopping...' : 'Running',
+    completed: 'Completed',
+    cancelled: 'Stopped',
+    error: 'Error'
+  };
+  $('#queueStatus').textContent = labels[d.status] || d.status;
+  if (d.currentPromptIndex != null && d.promptPreviews)
+    $('#currentLine').textContent = `Now: #${d.promptIndices[d.currentPromptIndex]} ${d.promptPreviews[d.currentPromptIndex]}`;
+  const finished = ['completed', 'cancelled', 'error'].includes(d.status);
+  $('#stopBtn').classList.toggle('hidden', finished);
+  if (finished) {
+    $('#currentLine').textContent =
+      d.status === 'completed'
+        ? `Finished: ${(d.results || []).filter((r) => r.success).length} OK, ${(d.results || []).filter((r) => !r.success).length} failed`
+        : '-';
+    $('#currentPct').textContent = '';
+    if (d.status === 'completed') toast('All prompts finished.');
+  }
+  applyStatusToRows(d);
+}
+
+/* ---------------- logging ---------------- */
+function addLog(e) {
+  logs.push(e);
+  if (logs.length > 800) logs = logs.slice(-800);
+  const box = $('#logs');
+  if (!box) return;
+  const div = document.createElement('div');
+  div.className = 'log ' + (e.level || 'info');
+  div.innerHTML = `<span class="t">${new Date(e.timestamp || Date.now()).toLocaleTimeString()}</span>${escapeHtml(e.message || '')}`;
+  box.appendChild(div);
+  while (box.childNodes.length > 800) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+  if (!$('#tab-logs').classList.contains('active')) {
+    unseenLogs++;
+    const b = $('#logBadge');
+    if (b) {
+      b.textContent = String(Math.min(unseenLogs, 99));
+      b.classList.remove('hidden');
+    }
+  }
+}
+
+function fillVoiceSelect() {
+  const sp = $('#defaultSpeaker');
+  const cur = settings.defaultSpeaker;
+  sp.innerHTML = '';
+  sp.add(new Option('None', 'none'));
+  VOICES.forEach(([n, g, style]) =>
+    sp.add(new Option(g === 'Flow' ? `${n} (from Flow)` : `${n} (${g}, ${style})`, n))
+  );
+  sp.value = VOICES.some(([n]) => n === cur) ? cur : 'none';
+  if (sp.value !== cur) {
+    settings.defaultSpeaker = sp.value;
+    saveSettings();
+  }
+  const vc = $('#voiceCount');
+  if (vc)
+    vc.textContent = `${VOICES.length} voices${scannedVoices.length ? ` (${scannedVoices.length} synced)` : ' (built-in)'}`;
+}
+
+/* ---------------- event bindings ---------------- */
+function wire() {
+  $$('.tab').forEach((t) =>
+    t.addEventListener('click', () => {
+      $$('.tab').forEach((x) => x.classList.toggle('active', x === t));
+      $$('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + t.dataset.tab));
+      if (t.dataset.tab === 'logs') {
+        unseenLogs = 0;
+        $('#logBadge').classList.add('hidden');
       }
-    });
+    })
+  );
 
-    if (!resp?.ok) {
-      els.startAutoFlowBtn.disabled = false;
-      showToast(resp?.error || 'Could not start batch.');
-      addLog('ERROR', resp?.error || 'Failed to start batch.');
+  $$('#modes .chip').forEach((c) =>
+    c.addEventListener('click', () => {
+      settings.mode = c.dataset.mode;
+      saveSettings();
+      refreshUI();
+    })
+  );
+
+  $$('#agentTypeRow .seg-btn').forEach((b) =>
+    b.addEventListener('click', () => {
+      settings.agentType = b.dataset.agent;
+      saveSettings();
+      refreshUI();
+    })
+  );
+
+  $('#maxImagesPerPrompt').addEventListener('change', (e) => {
+    settings[currentInfo().maxKey] = Number(e.target.value);
+    saveSettings();
+    refreshUI();
+  });
+
+  fillVoiceSelect();
+
+  $('#scanVoicesBtn').addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    if (!tab || !isFlowUrl(tab.url)) return toast('Open a Google Flow project first.', true);
+    $('#scanVoicesBtn').disabled = true;
+    try {
+      const r = await sendToTab(tab.id, { type: 'SCAN_VOICES' });
+      const list = (r && r.voices) || [];
+      if (!list.length) {
+        toast('Could not read voices from Flow - built-in list kept.', true);
+        return;
+      }
+      scannedVoices = Array.from(new Set(list.map((v) => String(v).trim()).filter(Boolean)));
+      await chrome.storage.local.set({ [VOICES_KEY]: scannedVoices });
+      mergeVoices();
+      fillVoiceSelect();
+      bindSettings();
+      refreshUI();
+      toast(`Synced ${scannedVoices.length} voice(s) from Flow`);
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      $('#scanVoicesBtn').disabled = false;
     }
-  } catch (err) {
-    els.startAutoFlowBtn.disabled = false;
-    addLog('ERROR', `Start failed: ${err.message}`);
-  }
-}
-
-async function stopBatchAutoFlow() {
-  els.queueStateText.textContent = 'Stopping...';
-  showToast('Stopping after the current step...');
-  addLog('WARN', 'User requested stop. Halting queue after current CDP operation.');
-  await chrome.runtime.sendMessage({ type: 'STOP_AUTOFLOW_BATCH' });
-  els.startAutoFlowBtn.disabled = false;
-}
-
-/* ==========================================================================
-   MODE & TAB UI UPDATES
-   ========================================================================== */
-function updateModeUI(selectedMode) {
-  state.mode = selectedMode;
-  els.modeCards.forEach((card) => {
-    card.classList.toggle('active', card.dataset.mode === selectedMode);
-  });
-  els.modeHelperText.textContent = MODE_DESCRIPTIONS[selectedMode] || '';
-
-  const isImageMode = selectedMode === 'text-to-image' || selectedMode === 'image-to-image';
-  if (isImageMode) {
-    els.modelSelect.value = 'nano-banana-2.1';
-    els.chainOrDurationLabel.textContent = 'Image Option';
-    els.chainOrDurationSelect.value = selectedMode === 'image-to-image' ? 'chain-edit' : 'new-image';
-  } else {
-    if (els.modelSelect.value === 'nano-banana-2.1') {
-      els.modelSelect.value = 'omni-flash';
-    }
-    els.chainOrDurationLabel.textContent = 'Duration / Chain';
-    if (els.chainOrDurationSelect.value.includes('image') || els.chainOrDurationSelect.value.includes('chain')) {
-      els.chainOrDurationSelect.value = '10s';
-    }
-  }
-}
-
-function switchTab(tabId) {
-  state.activeTab = tabId;
-  els.tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabId));
-  els.tabPanes.forEach((pane) => pane.classList.toggle('active', pane.id === `tab-${tabId}`));
-}
-
-/* ==========================================================================
-   LOGGING & TOAST HELPERS
-   ========================================================================== */
-function addLog(level, message) {
-  const time = new Date().toLocaleTimeString();
-  state.logs.unshift({ time, level, message });
-  if (state.logs.length > 250) state.logs.pop();
-
-  els.logCountBadge.textContent = `(${state.logs.length})`;
-
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td>${time}</td>
-    <td><span class="log-level ${level}">${level}</span></td>
-    <td>${escapeHtml(message)}</td>
-  `;
-  els.logsTableBody.prepend(tr);
-}
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-let toastTimer = null;
-function showToast(text) {
-  els.toastPopup.textContent = text;
-  els.toastPopup.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    els.toastPopup.classList.add('hidden');
-  }, 3600);
-}
-
-/* ==========================================================================
-   EVENT LISTENERS & RUNTIME MESSAGES
-   ========================================================================== */
-function bindEvents() {
-  // Tabs
-  els.tabBtns.forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Modes
-  els.modeCards.forEach((card) => {
-    card.addEventListener('click', () => updateModeUI(card.dataset.mode));
+  let t = null;
+  $('#prompts').addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      renderPrompts();
+      saveForm();
+    }, 250);
   });
 
-  // Image dropzone
-  els.imageDropzone.addEventListener('click', () => els.imageFileInput.click());
-  els.imageFileInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
-  els.imageDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    els.imageDropzone.classList.add('dragover');
-  });
-  els.imageDropzone.addEventListener('dragleave', () => els.imageDropzone.classList.remove('dragover'));
-  els.imageDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    els.imageDropzone.classList.remove('dragover');
-    handleImageFiles(e.dataTransfer.files);
+  $('#rangeTo').addEventListener('input', (e) => {
+    e.target._auto = false;
   });
 
-  els.removeAllImagesBtn.addEventListener('click', async () => {
-    state.uploadedImages = [];
-    if (chrome?.storage?.local) {
-      await chrome.storage.local.set({ autoflowImages: [] });
-    }
-    renderThumbnails();
-    parseAndRenderPrompts();
-    addLog('INFO', 'Cleared all uploaded reference images.');
+  $('#txtInput').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    $('#prompts').value = await f.text();
+    e.target.value = '';
+    $('#rangeTo')._auto = true;
+    renderPrompts();
+    saveForm();
   });
 
-  // Prompts live parsing
-  els.promptsTextarea.addEventListener('input', parseAndRenderPrompts);
-  els.maxImagesPerPrompt.addEventListener('change', parseAndRenderPrompts);
-  els.autoPickImagesToggle.addEventListener('change', parseAndRenderPrompts);
-  els.autoCharacterToggle.addEventListener('change', parseAndRenderPrompts);
-  els.autoVoiceToggle.addEventListener('change', parseAndRenderPrompts);
-  els.defaultVoiceSelect.addEventListener('change', parseAndRenderPrompts);
-
-  // Import .txt
-  els.importTxtBtn.addEventListener('click', () => els.importTxtInput.click());
-  els.importTxtInput.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      els.promptsTextarea.value = String(ev.target.result || '');
-      parseAndRenderPrompts();
-      addLog('INFO', `Imported prompt script "${file.name}" (${state.parsedPrompts.length} prompts).`);
-    };
-    reader.readAsText(file);
+  $('#imageInput').addEventListener('change', async (e) => {
+    await addFiles(Array.from(e.target.files));
+    e.target.value = '';
   });
 
-  // Scan characters & voices
-  els.scanCharactersBtn.addEventListener('click', scanCharactersFromFlow);
-  els.syncVoicesBtn.addEventListener('click', syncVoicesFromFlow);
-  els.addManualCharBtn?.addEventListener('click', handleAddManualCharacter);
-  els.manualCharInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  const dz = $('#dropZone');
+  ['dragenter', 'dragover'].forEach((ev) =>
+    dz.addEventListener(ev, (e) => {
       e.preventDefault();
-      handleAddManualCharacter();
+      dz.classList.add('drag');
+    })
+  );
+  ['dragleave', 'drop'].forEach((ev) =>
+    dz.addEventListener(ev, (e) => {
+      e.preventDefault();
+      dz.classList.remove('drag');
+    })
+  );
+  dz.addEventListener('drop', (e) => addFiles(Array.from(e.dataTransfer.files)));
+
+  $('#clearImagesBtn').addEventListener('click', () => {
+    images = [];
+    refreshUI();
+  });
+
+  $('#scanCharsBtn').addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    if (!tab || !isFlowUrl(tab.url)) return toast('Open a Google Flow project first.', true);
+    $('#scanCharsBtn').disabled = true;
+    try {
+      const r = await sendToTab(tab.id, { type: 'SCAN_CHARACTERS' });
+      const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+      scannedChars = ((r && r.characters) || [])
+        .map((c) => String(c).replace(/^@+/, '').trim())
+        .filter((c) => c && c.length >= 2 && !blocked.has(c.toLowerCase()));
+      
+      settings.defaultCharacters = settings.defaultCharacters.filter((c) => scannedChars.includes(c));
+      await chrome.storage.local.set({
+        [CHARS_KEY]: scannedChars,
+        autoflowCharacters: scannedChars
+      });
+      saveSettings();
+      refreshUI();
+      toast(
+        scannedChars.length ? `Found ${scannedChars.length} character(s): ${scannedChars.join(', ')}` : 'No characters found in current project',
+        !scannedChars.length
+      );
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      $('#scanCharsBtn').disabled = false;
     }
   });
 
-  // Start / Stop / Clear
-  els.startAutoFlowBtn.addEventListener('click', startBatchAutoFlow);
-  els.stopAutoFlowBtn.addEventListener('click', stopBatchAutoFlow);
-  els.clearPromptsBtn.addEventListener('click', () => {
-    els.promptsTextarea.value = '';
-    parseAndRenderPrompts();
-    addLog('INFO', 'Cleared prompt queue.');
+  $('#startBtn').addEventListener('click', start);
+  $('#stopBtn').addEventListener('click', stop);
+  $('#clearBtn').addEventListener('click', () => {
+    $('#prompts').value = '';
+    saveForm();
+    renderPrompts();
   });
 
-  // Settings & License
-  els.saveSettingsBtn.addEventListener('click', async () => {
-    await persistSettings();
-    showToast('Settings saved.');
-    addLog('INFO', 'Saved AsidZ AutoFlow settings and custom DOM selectors.');
+  $('#openFlowBtn').addEventListener('click', async (e) => {
+    const tab = await getActiveTab();
+    if (e.target.dataset.act === 'reload' && tab) chrome.tabs.reload(tab.id);
+    else if (tab) chrome.tabs.update(tab.id, { url: FLOW_URL });
+    else chrome.tabs.create({ url: FLOW_URL });
+    setTimeout(checkPage, 2500);
   });
 
-  els.openLicenseModalBtn.addEventListener('click', () => {
-    switchTab('settings');
-    els.licenseKeyInput.focus();
+  $('#openDlSettings').addEventListener('click', () => chrome.tabs.create({ url: 'chrome://settings/downloads' }));
+
+  $('#saveSelectors').addEventListener('click', async () => {
+    const raw = $('#customSelectors').value.trim();
+    if (raw) {
+      try {
+        const o = JSON.parse(raw);
+        if (typeof o !== 'object' || Array.isArray(o)) throw new Error();
+      } catch (_) {
+        return toast('Please enter a valid JSON object.', true);
+      }
+    }
+    await chrome.storage.local.set({ [SELECTORS_KEY]: raw, aws_custom_selectors: raw });
+    toast('Custom selectors saved.');
   });
 
-  els.verifyLicenseBtn.addEventListener('click', async () => {
-    await persistSettings();
-    await syncLicenseStatus();
-    showToast(`License active: ${state.license.tier}`);
+  $('#resetSelectors').addEventListener('click', async () => {
+    $('#customSelectors').value = '';
+    await chrome.storage.local.set({ [SELECTORS_KEY]: '', aws_custom_selectors: '' });
+    toast('Custom selectors cleared.');
   });
 
-  els.openDownloadSettingsBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'chrome://settings/downloads' });
+  $('#resetSettings').addEventListener('click', async () => {
+    if (!confirm('Reset all settings to AsidZ defaults?')) return;
+    settings = { ...DEFAULTS };
+    await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+    bindSettings();
+    refreshUI();
+    toast('Settings reset to defaults.');
   });
 
-  // Logs export & clear
-  els.clearLogsBtn.addEventListener('click', () => {
-    state.logs = [];
-    els.logsTableBody.innerHTML = '';
-    els.logCountBadge.textContent = '(0)';
+  $('#copyLogs').addEventListener('click', async () => {
+    const txt = logs
+      .map((l) => `[${new Date(l.timestamp || Date.now()).toISOString()}] [${(l.level || 'info').toUpperCase()}] ${l.message}`)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(txt);
+      toast('Logs copied to clipboard');
+    } catch (_) {
+      toast('Could not copy logs', true);
+    }
   });
 
-  els.exportLogsBtn.addEventListener('click', () => {
-    const text = state.logs.map((l) => `[${l.time}] [${l.level}] ${l.message}`).join('\n');
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `asidz-autoflow-logs-${Date.now()}.txt`;
-    a.click();
+  $('#clearLogs').addEventListener('click', () => {
+    logs = [];
+    $('#logs').innerHTML = '';
   });
 
-  // Official AsidZ External Links
-  const openUrl = (url) => chrome.tabs.create({ url });
-  els.asidzHomeBtn?.addEventListener('click', () => openUrl('https://asidz.com'));
-  els.asidzSupportBtn?.addEventListener('click', () => openUrl('https://asidz.com'));
-  els.footerAsidzBtn?.addEventListener('click', () => openUrl('https://asidz.com'));
-  els.footerSaasBtn?.addEventListener('click', () => openUrl(state.settings.saasApiUrl || 'http://localhost:5050'));
-
-  // Listen for real-time updates from Service Worker
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'QUEUE_PROGRESS_UPDATE') {
-      const q = msg.payload;
-      state.queue = { ...state.queue, ...q };
-      els.queueStateText.textContent = q.status;
-      els.queueFractionText.textContent = `${q.completedCount}/${q.totalToRun} prompts`;
-      const pct = q.totalToRun > 0 ? Math.round((q.completedCount / q.totalToRun) * 100) : 0;
-      els.queueProgressFill.style.width = `${pct}%`;
-      els.queueCurrentPromptText.textContent = q.currentPromptText || '';
-      els.queueStepPercentText.textContent = `#${q.currentIndex || 0}: ${q.stepPercent || 0}%`;
-      els.startAutoFlowBtn.disabled = q.status === 'Running';
-      renderParsedPromptCards();
-    } else if (msg.type === 'CDP_LOG_EVENT') {
-      addLog(msg.level || 'CDP', msg.message);
-    } else if (msg.type === 'QUOTA_UPDATED') {
-      state.license = msg.license;
-      renderQuotaUI();
+    if (!msg || !msg.type) return;
+    if (msg.type === 'ACTION_LOG') addLog(msg.data || {});
+    else if (msg.type === 'PROMPT_GROUP_STATUS') onGroupStatus(msg.data);
+    else if (msg.type === 'VIDEO_GENERATION_PROGRESS' && msg.data) {
+      $('#currentPct').textContent = `#${msg.data.promptIndex}: ${msg.data.percentage}%`;
     }
+  });
+
+  chrome.tabs.onActivated.addListener(() => checkPage());
+  chrome.tabs.onUpdated.addListener((id, info) => {
+    if (info.status === 'complete' || info.url) checkPage();
   });
 }
 
-init();
+(async function init() {
+  await loadAll();
+  wire();
+  bindSettings();
+  refreshUI();
+  checkPage();
+})();

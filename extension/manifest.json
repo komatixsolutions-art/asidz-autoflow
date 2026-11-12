@@ -1,65 +1,86 @@
 {
   "manifest_version": 3,
   "name": "AsidZ AutoFlow",
-  "version": "2.4.0",
-  "description": "Batch videos & images on Google Flow, auto-downloaded. Powered by AsidZ CDP Automation Engine & Cloud SaaS.",
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
-  "permissions": [
-    "sidePanel",
-    "debugger",
-    "storage",
-    "downloads",
-    "tabs",
-    "scripting",
-    "activeTab",
-    "notifications"
-  ],
-  "host_permissions": [
-    "https://flow.google.com/*",
-    "https://labs.google/*",
-    "https://*.google.com/*",
-    "http://localhost:4000/*"
-  ],
-  "background": {
-    "service_worker": "background/service-worker.js",
-    "type": "module"
-  },
-  "side_panel": {
-    "default_path": "sidepanel/index.html"
-  },
+  "short_name": "AsidZ Flow",
+  "description": "Batch generate videos and images on Google Flow with dock sync, character preservation, and auto-download. Official Platform: https://asidz.com",
+  "version": "2.5.0",
   "action": {
-    "default_title": "Open AsidZ AutoFlow Side Panel",
+    "default_title": "AsidZ AutoFlow",
     "default_icon": {
       "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "activeTab",
+    "downloads",
+    "debugger"
+  ],
+  "host_permissions": [
+    "*://flow.google.com/*",
+    "*://labs.google/*",
+    "*://*.googleusercontent.com/*",
+    "*://storage.googleapis.com/*"
+  ],
   "content_scripts": [
     {
       "matches": [
-        "https://flow.google.com/*",
-        "https://labs.google/fx/tools/flow*"
+        "*://flow.google.com/*",
+        "*://labs.google/fx/*"
       ],
       "js": [
-        "scripts/cdp-automator.js"
+        "scripts/page-upload.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "*://flow.google.com/*",
+        "*://labs.google/fx/*"
+      ],
+      "js": [
+        "scripts/jquery.min.js",
+        "scripts/selectors.js",
+        "scripts/helpers.js",
+        "scripts/flow.js",
+        "scripts/queue.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "sidepanel/*",
-        "scripts/*"
+        "scripts/*",
+        "assets/*",
+        "icons/*"
       ],
       "matches": [
-        "<all_urls>"
+        "*://flow.google.com/*",
+        "*://labs.google/*"
       ]
     }
-  ]
+  ],
+  "offline_enabled": true,
+  "minimum_chrome_version": "116"
 }

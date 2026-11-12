@@ -1,440 +1,284 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AsidZ AutoFlow — Google Flow Automation</title>
-  <link rel="icon" type="image/png" href="asidz-logo.png" />
-  <link rel="stylesheet" href="styles.css" />
+  <title>AsidZ AutoFlow</title>
+  <link rel="icon" href="../icons/icon32.png" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <!-- HEADER (AsidZ Branding) -->
-    <header class="top-header">
-      <div class="brand-row">
-        <div class="avatar-ring">
-          <img src="asidz-logo.png" alt="AsidZ Logo" class="avatar-logo-img" />
-        </div>
-        <div class="brand-text">
-          <div class="brand-title-row">
-            <h1>AsidZ AutoFlow</h1>
-            <span id="proBadge" class="tier-pill free">FREE</span>
-          </div>
-          <p class="brand-subtitle">Batch videos &amp; images on Google Flow, auto-downloaded.</p>
+  <div id="app">
+    <!-- ================= HEADER ================= -->
+    <header class="hero">
+      <div class="hero-row">
+        <div class="avatar-wrap"><img class="avatar" src="../assets/avatar.png" alt="AsidZ Logo" /></div>
+        <div class="hero-text">
+          <h1>AsidZ <span>AutoFlow</span></h1>
+          <p>Batch videos &amp; images on Google Flow, auto-downloaded.</p>
         </div>
       </div>
-
-      <div class="social-grid-row">
-        <button type="button" class="pill-btn asidz-btn" id="asidzHomeBtn">🌐 asidz.com</button>
-        <button type="button" class="pill-btn asidz-btn" id="asidzSupportBtn">💬 AsidZ Support</button>
-      </div>
-
-      <!-- SaaS Quota Bar -->
-      <div class="quota-strip" id="quotaStrip">
-        <div class="quota-info">
-          <span id="quotaText">Quota: 0 / 10 daily generations</span>
-          <button type="button" id="openLicenseModalBtn" class="link-btn">Upgrade / License Key</button>
-        </div>
-        <div class="quota-bar-bg">
-          <div class="quota-bar-fill" id="quotaBarFill" style="width: 0%"></div>
-        </div>
+      <div class="social">
+        <a class="soc asidz-link" href="https://asidz.com" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          AsidZ.com
+        </a>
+        <a class="soc asidz-link" href="https://asidz.com" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-2h2zm0-4h-2V7h2z"/></svg>
+          Support
+        </a>
       </div>
     </header>
 
-    <!-- CONNECTION STATUS BAR -->
-    <div class="conn-banner" id="connIndicator">
-      <span class="conn-dot connected" id="connDot"></span>
-      <span id="connText">Connected to Google Flow</span>
+    <!-- ================= PAGE STATUS ================= -->
+    <div id="pageStatus" class="page-status off">
+      <span class="dot"></span><span id="pageStatusText">Checking Google Flow tab...</span>
+      <button id="openFlowBtn" class="btn tiny ghost hidden">Open Google Flow</button>
     </div>
 
-    <!-- NAVIGATION TABS -->
-    <nav class="tab-nav">
-      <button type="button" class="tab-btn active" data-tab="control">Control</button>
-      <button type="button" class="tab-btn" data-tab="settings">Settings</button>
-      <button type="button" class="tab-btn" data-tab="logs">Logs <span id="logCountBadge" class="log-badge">(0)</span></button>
+    <!-- ================= TABS ================= -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="control">Control</button>
+      <button class="tab" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="logs">Logs <span id="logBadge" class="badge hidden">0</span></button>
     </nav>
 
-    <!-- MAIN CONTENT CONTAINER -->
-    <main class="tab-content-container">
-      <!-- ==================== TAB 1: CONTROL ==================== -->
-      <section id="tab-control" class="tab-pane active">
-        <!-- A. MODE BLOCK -->
-        <div class="panel-card">
-          <div class="card-section-title">MODE</div>
-          <div class="mode-grid" id="modeGrid">
-            <button type="button" class="mode-card active" data-mode="text-to-video">
-              <span class="mode-icon">🎬</span>
-              <span class="mode-name">Text to Video</span>
-            </button>
-            <button type="button" class="mode-card" data-mode="frame-to-video">
-              <span class="mode-icon">🎞️</span>
-              <span class="mode-name">Frame to Video</span>
-            </button>
-            <button type="button" class="mode-card" data-mode="ingredients-to-video">
-              <span class="mode-icon">🧩</span>
-              <span class="mode-name">Ingredients to Video</span>
-            </button>
-            <button type="button" class="mode-card" data-mode="text-to-image">
-              <span class="mode-icon">🖼️</span>
-              <span class="mode-name">Text to Image</span>
-            </button>
-            <button type="button" class="mode-card" data-mode="image-to-image">
-              <span class="mode-icon">✨</span>
-              <span class="mode-name">Image to Image</span>
-            </button>
-            <button type="button" class="mode-card" data-mode="agent-automation">
-              <span class="mode-icon">🤖</span>
-              <span class="mode-name">Agent Automation</span>
-            </button>
-          </div>
-          <p class="mode-helper-text" id="modeHelperText">
-            Generate cinematic videos consecutively from your batch prompt script.
-          </p>
+    <!-- ================= CONTROL ================= -->
+    <section id="tab-control" class="tab-panel active">
+      <div class="card">
+        <div class="card-title">Generation Mode</div>
+        <div class="modes" id="modes">
+          <button class="chip" data-mode="textToVideo"><b>Text</b> to Video</button>
+          <button class="chip" data-mode="imageToVideo"><b>Frame</b> to Video</button>
+          <button class="chip" data-mode="componentsToVideo"><b>Ingredients</b> to Video</button>
+          <button class="chip" data-mode="textToImage"><b>Text</b> to Image</button>
+          <button class="chip" data-mode="imageToImage"><b>Image</b> to Image</button>
+          <button class="chip" data-mode="agentAutomation"><b>Agent</b> Automation</button>
         </div>
-
-        <!-- B. GENERATION SETTINGS BLOCK -->
-        <div class="panel-card">
-          <div class="card-section-title">GENERATION</div>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label for="aspectRatioSelect">Aspect ratio</label>
-              <select id="aspectRatioSelect" class="dark-select">
-                <option value="16:9">16:9 YouTube</option>
-                <option value="9:16">9:16 Shorts/TikTok</option>
-                <option value="1:1">1:1 Square</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="outputsPerPromptSelect">Outputs per prompt</label>
-              <select id="outputsPerPromptSelect" class="dark-select">
-                <option value="1">x1</option>
-                <option value="2">x2</option>
-                <option value="3">x3</option>
-                <option value="4">x4</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="modelSelect">Model</label>
-              <select id="modelSelect" class="dark-select">
-                <option value="omni-flash">Omni 1.1 Flash (Omni Flash)</option>
-                <option value="veo-2">Veo 2</option>
-                <option value="veo-3">Veo 3</option>
-                <option value="nano-banana-2.1">Nano Banana 2.1</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="chainOrDurationSelect" id="chainOrDurationLabel">Duration / Chain</label>
-              <select id="chainOrDurationSelect" class="dark-select">
-                <option value="10s">10s</option>
-                <option value="8s">8s</option>
-                <option value="5s">5s</option>
-                <option value="new-image">New image each prompt</option>
-                <option value="chain-edit">Chain: edit previous image</option>
-              </select>
-            </div>
-          </div>
+        <p class="hint" id="modeHint"></p>
+        <div id="agentTypeRow" class="seg hidden">
+          <button class="seg-btn" data-agent="agentAutomationToImage">Create images</button>
+          <button class="seg-btn" data-agent="agentAutomationToVideo">Create videos</button>
         </div>
-
-        <!-- C. IMAGES UPLOAD & MAPPING BLOCK -->
-        <div class="panel-card" id="imagesSectionCard">
-          <div class="card-section-title">IMAGES</div>
-          <div class="image-dropzone" id="imageDropzone">
-            <input type="file" id="imageFileInput" multiple accept="image/*" hidden />
-            <p>Click or drop images here. Name files like the word in your prompt (e.g. <code>mountain.png</code>) to auto-pick them.</p>
-          </div>
-          <div class="thumbnail-strip" id="thumbnailStrip"></div>
-          <div class="control-row-split">
-            <div class="inline-field">
-              <label for="maxImagesPerPrompt">Max images per prompt</label>
-              <select id="maxImagesPerPrompt" class="dark-select compact">
-                <option value="1">1</option>
-                <option value="2" selected>2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-              </select>
-            </div>
-            <div class="inline-field">
-              <span>Auto pick by name</span>
-              <label class="burgundy-switch">
-                <input type="checkbox" id="autoPickImagesToggle" checked />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-          <button type="button" class="secondary-btn full-width mt-8" id="removeAllImagesBtn">Remove all images</button>
-        </div>
-
-        <!-- D. VOICE (SPEAKER) BLOCK -->
-        <div class="panel-card" id="voiceSectionCard">
-          <div class="card-section-title">VOICE (SPEAKER)</div>
-          <div class="control-row-split">
-            <span>Auto voice by name in prompt</span>
-            <label class="burgundy-switch">
-              <input type="checkbox" id="autoVoiceToggle" checked />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="control-row-split mt-8">
-            <div class="form-group flex-1">
-              <label for="defaultVoiceSelect">Default voice</label>
-              <select id="defaultVoiceSelect" class="dark-select">
-                <option value="None">None</option>
-                <option value="Aoede">Aoede (Breezy Female)</option>
-                <option value="Alnilam">Alnilam (Deep Male)</option>
-                <option value="Puck">Puck (Warm Narrator)</option>
-                <option value="Charon">Charon (Cinematic Deep)</option>
-                <option value="Kore">Kore (Natural Female)</option>
-                <option value="Fenrir">Fenrir (Dramatic Male)</option>
-              </select>
-            </div>
-            <button type="button" class="secondary-btn sync-btn" id="syncVoicesBtn">Sync voices from Flow</button>
-          </div>
-          <p class="helper-note mt-6">
-            Voice is picked after character tags. 'Sync' reads Flow's own voice library.
-          </p>
-        </div>
-
-        <!-- E. CHARACTERS BLOCK -->
-        <div class="panel-card">
-          <div class="card-section-title">CHARACTERS</div>
-          <div class="control-row-split">
-            <span>Auto @character by name</span>
-            <label class="burgundy-switch">
-              <input type="checkbox" id="autoCharacterToggle" checked />
-              <span class="slider"></span>
-            </label>
-            <button type="button" class="secondary-btn" id="scanCharactersBtn">Scan characters from Flow</button>
-          </div>
-          <div class="character-pills-row" id="characterPillsContainer">
-            <span class="helper-note" id="noCharHint">No characters added yet. Scan from Flow or type below.</span>
-          </div>
-          <div class="control-row-split mt-8">
-            <input type="text" id="manualCharInput" class="dark-input flex-1" placeholder="Type character name (e.g. @Ali, @Yuna)" />
-            <button type="button" class="secondary-btn" id="addManualCharBtn">+ Add</button>
-          </div>
-        </div>
-
-        <!-- F. PROMPTS INPUT & QUEUE PARSER -->
-        <div class="panel-card">
-          <div class="card-header-flex">
-            <span class="card-section-title">PROMPTS <span id="promptTotalCount">0</span></span>
-            <span class="tag-hint">Use <code>#tag</code> to name files</span>
-          </div>
-          <textarea
-            id="promptsTextarea"
-            class="prompts-textarea"
-            rows="6"
-            placeholder="Paste prompts here (one prompt per paragraph, leave an empty line between prompts).&#10;&#10;#shot_01 Cinematic aerial view of a futuristic neon city skyline at dusk, ultra-detailed 4K HDR...&#10;&#10;#shot_02 Close-up macro portrait with dramatic cinematic lighting..."
-          ></textarea>
-
-          <div class="prompt-toolbar">
-            <input type="file" id="importTxtInput" accept=".txt,.md,.csv" hidden />
-            <button type="button" class="secondary-btn" id="importTxtBtn">Import .txt</button>
-            <div class="run-range-group">
-              <span>Run</span>
-              <input type="number" id="runFromInput" class="range-input" value="1" min="1" />
-              <span>to</span>
-              <input type="number" id="runToInput" class="range-input" value="1" min="1" />
-            </div>
-          </div>
-
-          <!-- Parsed Prompt Cards List -->
-          <div class="parsed-prompts-list" id="parsedPromptsList"></div>
-        </div>
-
-        <!-- G. EXECUTION CONTROLS -->
-        <div class="execution-bar">
-          <button type="button" id="startAutoFlowBtn" class="start-btn">Start AutoFlow</button>
-          <button type="button" id="stopAutoFlowBtn" class="stop-btn">Stop</button>
-          <button type="button" id="clearPromptsBtn" class="clear-btn">Clear</button>
-        </div>
-
-        <!-- H. QUEUE & LIVE PROGRESS MONITOR -->
-        <div class="panel-card queue-card">
-          <div class="card-section-title">QUEUE</div>
-          <div class="queue-status-row">
-            <span id="queueStateText">Idle</span>
-            <span id="queueFractionText">0/0 prompts</span>
-          </div>
-          <div class="queue-progress-track">
-            <div class="queue-progress-fill" id="queueProgressFill" style="width: 0%"></div>
-          </div>
-          <div class="queue-now-row">
-            <span id="queueCurrentPromptText" class="truncate-text">Ready to start batch automation on Google Flow.</span>
-            <span id="queueStepPercentText">#0: 0%</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- ==================== TAB 2: SETTINGS ==================== -->
-      <section id="tab-settings" class="tab-pane">
-        <!-- 1. SPEED & RETRIES -->
-        <div class="panel-card">
-          <div class="card-section-title">SPEED &amp; RETRIES</div>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label for="concurrencySelect">Prompts at the same time</label>
-              <select id="concurrencySelect" class="dark-select">
-                <option value="1" selected>1</option>
-                <option value="2">2</option>
-                <option value="5">5</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="agentOutputsSelect">Agent outputs per prompt</label>
-              <select id="agentOutputsSelect" class="dark-select">
-                <option value="1">1</option>
-                <option value="2" selected>2</option>
-                <option value="4">4</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="delayMinInput">Delay min (sec)</label>
-              <input type="number" id="delayMinInput" class="dark-input" value="0" min="0" max="300" />
-            </div>
-            <div class="form-group">
-              <label for="delayMaxInput">Delay max (sec)</label>
-              <input type="number" id="delayMaxInput" class="dark-input" value="5" min="1" max="600" />
-            </div>
-            <div class="form-group">
-              <label for="maxRetriesInput">Max retries</label>
-              <input type="number" id="maxRetriesInput" class="dark-input" value="1" min="0" max="5" />
-            </div>
-            <div class="form-group switch-align">
-              <span>Zoom out Flow while running</span>
-              <label class="burgundy-switch">
-                <input type="checkbox" id="zoomOutFlowToggle" checked />
-                <span class="slider"></span>
-              </label>
-            </div>
-            <div class="form-group">
-              <label for="approvalPolicySelect">Project &amp; Agent Approval</label>
-              <select id="approvalPolicySelect" class="dark-select">
-                <option value="always-approve" selected>Always Approve in Project</option>
-                <option value="approve">Approve Each Step</option>
-                <option value="reject">Auto Reject</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <!-- 2. AUTO DOWNLOAD -->
-        <div class="panel-card">
-          <div class="card-section-title">AUTO DOWNLOAD</div>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label for="videoQualitySelect">Video quality</label>
-              <select id="videoQualitySelect" class="dark-select">
-                <option value="720p" selected>720p (fast)</option>
-                <option value="1080p">1080p (high)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="imageQualitySelect">Image quality</label>
-              <select id="imageQualitySelect" class="dark-select">
-                <option value="1K" selected>1K (fast)</option>
-                <option value="2K">2K</option>
-                <option value="4K">4K</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-grid-2 mt-8">
-            <div class="form-group">
-              <label for="saveFolderInput">Save to folder</label>
-              <input type="text" id="saveFolderInput" class="dark-input" value="asidz-flow" />
-            </div>
-            <div class="form-group switch-align">
-              <span>Auto rename files</span>
-              <label class="burgundy-switch">
-                <input type="checkbox" id="autoRenameToggle" checked />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-          <div class="form-group mt-8">
-            <label for="fileNamingSelect">File naming</label>
-            <select id="fileNamingSelect" class="dark-select">
-              <option value="tag-timecode">Prompt Tag + time code (0-00.png, 0-04.mp4 from #tag)</option>
-              <option value="index-slug">Index + Prompt Slug (001_cinematic_shot.mp4)</option>
-              <option value="raw-tag">Exact #tag only (shot_01.mp4)</option>
-            </select>
-          </div>
-          <p class="helper-note mt-6">
-            Files go into Downloads/&lt;folder&gt;. Turn OFF "Ask where to save each file" in Chrome so downloads run automatically.
-          </p>
-          <button type="button" class="secondary-btn full-width mt-8" id="openDownloadSettingsBtn">Open Chrome download settings</button>
-        </div>
-
-        <!-- 3. SAAS CLOUD & LICENSE -->
-        <div class="panel-card">
-          <div class="card-section-title">SAAS LICENSE &amp; CLOUD API</div>
-          <div class="form-group">
-            <label for="saasApiUrlInput">SaaS Backend API</label>
-            <input type="text" id="saasApiUrlInput" class="dark-input" value="http://localhost:5050" placeholder="http://localhost:5050" />
-          </div>
-          <div class="form-group mt-8">
-            <label for="licenseKeyInput">License Key</label>
-            <div class="control-row-split">
-              <input type="text" id="licenseKeyInput" class="dark-input flex-1" placeholder="PRO-AUTOMA-8888-DEMO" />
-              <button type="button" class="secondary-btn" id="verifyLicenseBtn">Activate</button>
-            </div>
-          </div>
-          <p class="helper-note mt-6" id="licenseStatusNote">Demo Pro Key: <code>PRO-AUTOMA-8888-DEMO</code></p>
-        </div>
-
-        <!-- 4. ADVANCED: CUSTOM SELECTORS -->
-        <div class="panel-card">
-          <div class="card-section-title">ADVANCED: CUSTOM SELECTORS</div>
-          <p class="helper-note mb-6">JSON override for Google Flow DOM selectors:</p>
-          <textarea id="customSelectorsTextarea" class="code-textarea" rows="6">{
-  "promptTextarea": "textarea, [contenteditable='true'], [role='textbox'], input[placeholder*='create' i]",
-  "submitButton": "button[type='submit'], button[aria-label*='Generate' i], button[aria-label*='Create' i], button[aria-label*='Submit' i]",
-  "fileInput": "input[type='file']",
-  "characterChips": "[data-character-name], .character-chip, [aria-label*='@']"
-}</textarea>
-          <button type="button" class="secondary-btn full-width mt-8" id="saveSettingsBtn">Save All Settings</button>
-        </div>
-      </section>
-
-      <!-- ==================== TAB 3: LOGS ==================== -->
-      <section id="tab-logs" class="tab-pane">
-        <div class="panel-card logs-card">
-          <div class="card-header-flex">
-            <span class="card-section-title">LIVE CDP &amp; AUTOMATION LOGS</span>
-            <div class="log-actions">
-              <button type="button" class="secondary-btn compact" id="exportLogsBtn">Export</button>
-              <button type="button" class="secondary-btn compact" id="clearLogsBtn">Clear</button>
-            </div>
-          </div>
-          <div class="logs-table-wrap">
-            <table class="logs-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Level</th>
-                  <th>Event / Details</th>
-                </tr>
-              </thead>
-              <tbody id="logsTableBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <!-- TOAST NOTIFICATION POPUP -->
-    <div id="toastPopup" class="toast-popup hidden">Started prompt(s). Keep the Flow tab open.</div>
-
-    <!-- FOOTER -->
-    <footer class="bottom-footer">
-      <span>⚡ Made by AsidZ AutoFlow</span>
-      <div class="footer-links">
-        <button type="button" class="footer-link-btn" id="footerAsidzBtn">asidz.com</button>
-        <button type="button" class="footer-link-btn" id="footerSaasBtn">SaaS Portal</button>
       </div>
+
+      <div class="card">
+        <div class="card-title">Flow Dock Parameters</div>
+        <div class="grid2">
+          <label class="field"><span>Aspect ratio</span>
+            <select id="q_aspectRatio" data-setting="aspectRatio">
+              <option value="16:9">16:9 Widescreen</option>
+              <option value="9:16">9:16 Shorts / Reels</option>
+              <option value="square">Square (1:1)</option>
+              <option value="portrait">Portrait (4:5)</option>
+              <option value="landscape">Landscape (21:9)</option>
+            </select>
+          </label>
+          <label class="field"><span>Outputs per prompt</span>
+            <select id="q_outputCount" data-setting="outputCount">
+              <option value="1">x1</option><option value="2">x2</option><option value="3">x3</option><option value="4">x4</option>
+            </select>
+          </label>
+          <label class="field video-only"><span>Video model</span>
+            <select id="q_model" data-setting="model">
+              <option value="Veo 3.1 - Lite">Veo 3.1 - Lite</option>
+              <option value="Veo 3.1 - Fast">Veo 3.1 - Fast</option>
+              <option value="Veo 3.1 - Quality">Veo 3.1 - Quality</option>
+              <option value="Omni 1.1 Flash">Omni 1.1 Flash (Omni Flash)</option>
+            </select>
+          </label>
+          <label class="field image-only"><span>Image model</span>
+            <select id="q_imageModel" data-setting="imageModel">
+              <option value="Nano Banana Pro">Nano Banana Pro</option>
+              <option value="Nano Banana 2.1">Nano Banana 2.1</option>
+              <option value="Nano Banana 2.1 Light">Nano Banana 2.1 Light</option>
+            </select>
+          </label>
+          <label class="field video-only"><span>Duration / chain</span>
+            <select id="q_defaultVideoOption" data-setting="defaultVideoOption">
+              <option value="4s">4s</option><option value="6s">6s</option><option value="8s">8s</option><option value="10s">10s</option>
+              <option value="4s-concat">4s + extend chain</option><option value="6s-concat">6s + extend chain</option>
+              <option value="8s-concat">8s + extend chain</option><option value="10s-concat">10s + extend chain</option>
+            </select>
+          </label>
+          <label class="field image-only"><span>Image option</span>
+            <select id="q_defaultImageOption" data-setting="defaultImageOption">
+              <option value="new-image">New image each prompt</option>
+              <option value="new-image-concat">Chain: edit previous image</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint" id="chainHint">Extend chain: each next prompt starts from the last frame / image of the previous one (sequential).</p>
+      </div>
+
+      <!-- images -->
+      <div class="card" id="imagesCard">
+        <div class="card-title">Reference Images <span class="muted" id="imgCount"></span></div>
+        <label class="drop" id="dropZone">
+          <input type="file" id="imageInput" multiple accept="image/*" />
+          <span>Click or drop reference images here</span>
+          <small id="dropHint">Name files like words in your prompt (e.g. <i>warrior.png</i>) to auto-attach them.</small>
+        </label>
+        <div class="thumbs" id="thumbs"></div>
+        <div class="grid2">
+          <label class="field"><span>Max images per prompt</span>
+            <select id="maxImagesPerPrompt"></select>
+          </label>
+          <div class="field toggle-field">
+            <span>Auto pick by name</span>
+            <label class="switch"><input type="checkbox" id="autoAddCharacterImages" data-setting="autoAddCharacterImages" /><i></i></label>
+          </div>
+        </div>
+        <button class="btn tiny ghost" id="clearImagesBtn">Remove all images</button>
+      </div>
+
+      <!-- voice -->
+      <div class="card" id="voiceCard">
+        <div class="card-title">Voice &amp; Audio</div>
+        <div class="grid2">
+          <div class="field toggle-field">
+            <span>Auto voice by name</span>
+            <label class="switch"><input type="checkbox" id="autoAddVoiceBySpeaker" data-setting="autoAddVoiceBySpeaker" /><i></i></label>
+          </div>
+          <label class="field"><span>Default voice</span>
+            <select id="defaultSpeaker" data-setting="defaultSpeaker"></select>
+          </label>
+        </div>
+        <div class="row-gap">
+          <button class="btn tiny ghost" id="scanVoicesBtn">Sync voices from Flow</button>
+          <span class="muted small" id="voiceCount"></span>
+        </div>
+        <p class="hint">Voice is selected after @character tag. "Sync" reads your active Google Flow voice library.</p>
+      </div>
+
+      <!-- characters -->
+      <div class="card" id="charCard">
+        <div class="card-title">Character Consistency</div>
+        <div class="grid2">
+          <div class="field toggle-field">
+            <span>Auto @character by name</span>
+            <label class="switch"><input type="checkbox" id="enableCharacterControl" data-setting="enableCharacterControl" /><i></i></label>
+          </div>
+          <button class="btn tiny ghost" id="scanCharsBtn">Scan characters from Flow</button>
+        </div>
+        <div class="char-list" id="charList"><span class="muted small">No characters scanned yet. Open your Flow project and click Scan.</span></div>
+      </div>
+
+      <!-- prompts -->
+      <div class="card">
+        <div class="card-title">Prompt Queue <span class="muted" id="promptCount">0</span></div>
+        <textarea id="prompts" rows="8" placeholder="Scene 1 — High aerial view of a neon city at dusk...&#10;&#10;Scene 2 — Cinematic close-up with dramatic lighting...&#10;&#10;(Leave one empty line between prompts. Use #tag at start of prompt to name the downloaded file.)"></textarea>
+        <div class="row-between">
+          <label class="file-btn">Import .txt<input type="file" id="txtInput" accept=".txt,text/plain" /></label>
+          <div class="range">
+            <span>Run</span>
+            <input type="number" id="rangeFrom" min="1" value="1" />
+            <span>to</span>
+            <input type="number" id="rangeTo" min="1" value="1" />
+          </div>
+        </div>
+        <div class="prompt-list" id="promptList"></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="startBtn">Start AutoFlow</button>
+        <button class="btn danger hidden" id="stopBtn">Stop</button>
+        <button class="btn ghost" id="clearBtn">Clear</button>
+      </div>
+
+      <div class="card" id="progressCard">
+        <div class="card-title">Execution Queue</div>
+        <div id="queueEmpty" class="muted small">Queue is idle.</div>
+        <div id="queueBox" class="hidden">
+          <div class="row-between small"><span id="queueStatus">-</span><span id="queueCount">0/0</span></div>
+          <div class="bar"><i id="queueBar"></i></div>
+          <div class="row-between small"><span id="currentLine" class="muted">-</span><span id="currentPct" class="muted"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SETTINGS ================= -->
+    <section id="tab-settings" class="tab-panel">
+      <div class="card">
+        <div class="card-title">Queue Speed &amp; Retries</div>
+        <div class="grid2">
+          <label class="field"><span>Concurrent generations</span>
+            <select data-setting="concurrentPrompts"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label class="field"><span>Agent outputs per prompt</span>
+            <select data-setting="agentOutputCount"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+          </label>
+          <label class="field"><span>Delay min (sec)</span><input type="number" min="0" max="600" data-setting="promptDelaySecondsMin" /></label>
+          <label class="field"><span>Delay max (sec)</span><input type="number" min="0" max="600" data-setting="promptDelaySecondsMax" /></label>
+          <label class="field"><span>Max retries</span><input type="number" min="0" max="20" data-setting="maxRetries" /></label>
+          <div class="field toggle-field"><span>Zoom canvas to 90%</span>
+            <label class="switch"><input type="checkbox" data-setting="zoomOutWhileRunning" /><i></i></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Auto Download &amp; Naming</div>
+        <div class="grid2">
+          <label class="field"><span>Video quality</span>
+            <select data-setting="autoDownloadVideoQuality">
+              <option value="no-download">No download</option><option value="720">720p (Fast)</option><option value="1080">1080p (Upscale)</option><option value="4k">4K (Upscale)</option>
+            </select>
+          </label>
+          <label class="field"><span>Image quality</span>
+            <select data-setting="autoDownloadImageQuality">
+              <option value="no-download">No download</option><option value="1k">1K (Fast)</option><option value="2k">2K (Upscale)</option><option value="4k">4K (Upscale)</option>
+            </select>
+          </label>
+          <label class="field"><span>Save to folder</span><input type="text" placeholder="asidz-flow" data-setting="folderName" /></label>
+          <div class="field toggle-field"><span>Auto rename files</span>
+            <label class="switch"><input type="checkbox" data-setting="autoChangeFileName" /><i></i></label>
+          </div>
+          <label class="field span2"><span>File naming format</span>
+            <select data-setting="fileNamingSystem">
+              <option value="prompt_tag">Prompt tag + timecode (#tag_0-04.mp4)</option>
+              <option value="simple">Simple numbering (1 video.mp4, 2 video.mp4)</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Downloads are saved into Downloads/&lt;folder&gt;. Disable Chrome's "Ask where to save each file" for automatic downloading.</p>
+        <button class="btn tiny ghost" id="openDlSettings">Open Chrome download settings</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Custom DOM Selectors</div>
+        <p class="hint">Override Angular component selectors if Google Flow updates its interface.</p>
+        <textarea id="customSelectors" rows="5" placeholder='{ }'></textarea>
+        <div class="row-gap">
+          <button class="btn tiny ghost" id="saveSelectors">Save selectors</button>
+          <button class="btn tiny ghost" id="resetSelectors">Reset to defaults</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn ghost" id="resetSettings">Reset all settings</button>
+      </div>
+      <p class="hint center" id="savedNote">Settings auto-save to Chrome storage.</p>
+    </section>
+
+    <!-- ================= LOGS ================= -->
+    <section id="tab-logs" class="tab-panel">
+      <div class="row-gap">
+        <button class="btn tiny ghost" id="copyLogs">Copy logs</button>
+        <button class="btn tiny ghost" id="clearLogs">Clear</button>
+      </div>
+      <div class="logs" id="logs"></div>
+    </section>
+
+    <!-- ================= FOOTER ================= -->
+    <footer class="foot">
+      <img src="../assets/avatar.png" alt="AsidZ Logo" class="mini-avatar" />
+      <span>Powered by <b>AsidZ AutoFlow</b></span>
+      <a href="https://asidz.com" target="_blank" rel="noopener noreferrer">AsidZ.com</a>
     </footer>
   </div>
 
-  <script src="app.js" type="module"></script>
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
 </body>
 </html>
