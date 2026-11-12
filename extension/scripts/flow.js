@@ -1992,13 +1992,22 @@
     return `Scene${cfg.promptIndex || 1}`;
   }
 
+  function formatAspectRatio(ar) {
+    const raw = String(ar || '16:9').trim().toLowerCase();
+    if (raw === 'square') return '1-1';
+    if (raw === 'portrait') return '4-5';
+    if (raw === 'landscape') return '21-9';
+    return sanitize(raw).replace(/\s+/g, '-') || '16-9';
+  }
+
   function fileStem(cfg, isVideo, i, total) {
     const type = isVideo ? 'video' : 'image';
     const suffix = total > 1 ? `_${i + 1}` : '';
     if (cfg.fileNamingSystem === 'simple') return `${cfg.promptIndex} ${type}${suffix}`;
     const proj = getProjectName();
     const scene = extractSceneLabel(cfg);
-    return `${proj}_${scene}${suffix}`;
+    const ratio = formatAspectRatio(cfg.aspectRatio);
+    return `${proj}_${scene}_${ratio}_${type}${suffix}`;
   }
 
   A.fileStem = fileStem;
