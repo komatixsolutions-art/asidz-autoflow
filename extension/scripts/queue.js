@@ -115,9 +115,10 @@
 
       try {
         const tries = g.retryCountByIndex[idx] || 0;
+        cfg.attempt = tries + 1;
         g.currentPromptIndex = idx;
         publish(g);
-        A.log(`Prompt #${cfg.promptIndex}: starting submission`);
+        A.log(`Prompt #${cfg.promptIndex}: starting submission (attempt v${cfg.attempt})`);
         const res = await A.uiLock.run(() => A.runPrompt(cfg, () => !!g.isCancelling));
         g.currentPromptIndex = undefined;
 

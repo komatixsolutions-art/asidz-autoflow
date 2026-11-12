@@ -113,6 +113,10 @@
           <button class="btn tiny ghost" id="scanModelsBtn">Sync models from Flow</button>
           <span class="muted small" id="modelCount"></span>
         </div>
+        <div id="modelWarningBanner" class="warn-banner hidden">
+          <span id="modelWarningText">Veo 3.1 has a 2-ingredient/character limit in Flow and may fail or stall at 0%. Use Omni 1.1 Flash or Omni 1.2 Flash for multi-character scenes.</span>
+          <button class="btn tiny" id="switchOmniBtn">Switch to Omni 1.1 Flash</button>
+        </div>
         <p class="hint" id="chainHint">Extend chain: each next prompt starts from the last frame / image of the previous one (sequential).</p>
       </div>
 
@@ -241,7 +245,7 @@
           </div>
           <label class="field span2"><span>File naming format</span>
             <select data-setting="fileNamingSystem">
-              <option value="prompt_tag">Prompt tag + timecode (#tag_0-04.mp4)</option>
+              <option value="prompt_tag">Project_Scene_vAttempt_HHMM_DDMMYYYY (Recommended)</option>
               <option value="simple">Simple numbering (1 video.mp4, 2 video.mp4)</option>
             </select>
           </label>

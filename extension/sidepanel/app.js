@@ -310,6 +310,39 @@ function refreshUI() {
   renderChars();
   renderThumbs();
   renderPrompts();
+  checkModelCompatibility();
+}
+
+let runtimeModelWarning = '';
+function checkModelCompatibility(reason) {
+  if (typeof reason === 'string') runtimeModelWarning = reason;
+  const banner = $('#modelWarningBanner');
+  if (!banner) return;
+  const video = isVideoMode();
+  const isVeo = /\bveo\b/i.test(settings.model || '');
+  if (!video || !isVeo) {
+    runtimeModelWarning = '';
+    banner.classList.add('hidden');
+    return;
+  }
+  const prompts = parsePrompts($('#prompts').value);
+  const per = imagesPerPrompt(prompts);
+  const hasMultiIngredients = prompts.some((p, i) => {
+    const ch = charactersFor(p);
+    const chCount = ch ? ch.length : 0;
+    const imgCount = (per[i] && per[i].length) || 0;
+    return chCount >= 2 || imgCount >= 2 || chCount + imgCount >= 2;
+  });
+  const show = hasMultiIngredients || settings.mode === 'componentsToVideo' || !!runtimeModelWarning;
+  if (show) {
+    const txt = $('#modelWarningText');
+    if (txt) {
+      txt.textContent = runtimeModelWarning
+        ? `Flow reported a limitation on ${settings.model}: ${runtimeModelWarning}. Switch to Omni 1.1 Flash or Omni 1.2 Flash.`
+        : `${settings.model} has a 2-ingredient/character limit in Flow and may fail or stall at 0%. Switch to Omni 1.1 Flash or Omni 1.2 Flash for multi-character scenes.`;
+    }
+  }
+  banner.classList.toggle('hidden', !show);
 }
 
 /* ---------------- prompts logic ---------------- */
@@ -1033,12 +1066,31 @@ function wire() {
     $('#logs').innerHTML = '';
   });
 
+  const switchOmniBtn = $('#switchOmniBtn');
+  if (switchOmniBtn) {
+    switchOmniBtn.addEventListener('click', () => {
+      const target = VIDEO_MODELS.find((m) => /omni\s*1\.1\s*flash/i.test(m))
+        || VIDEO_MODELS.find((m) => /omni\s*1\.2\s*flash/i.test(m))
+        || 'Omni 1.1 Flash';
+      settings.model = target;
+      const vm = $('#q_model');
+      if (vm) vm.value = target;
+      runtimeModelWarning = '';
+      saveSettings();
+      refreshUI();
+      toast(`Switched video model to ${target}`);
+    });
+  }
+
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg || !msg.type) return;
     if (msg.type === 'ACTION_LOG') addLog(msg.data || {});
     else if (msg.type === 'PROMPT_GROUP_STATUS') onGroupStatus(msg.data);
     else if (msg.type === 'VIDEO_GENERATION_PROGRESS' && msg.data) {
       $('#currentPct').textContent = `#${msg.data.promptIndex}: ${msg.data.percentage}%`;
+    } else if (msg.type === 'MODEL_LIMIT_WARNING' && msg.data) {
+      checkModelCompatibility(msg.data.reason || 'Model ingredient/limit reached');
+      toast(`Tip: Switch to ${msg.data.recommended ? msg.data.recommended[0] : 'Omni 1.1 Flash'} for multi-character scenes.`, true);
     }
   });
 

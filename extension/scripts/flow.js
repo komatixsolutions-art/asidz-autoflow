@@ -170,6 +170,49 @@
     return true;
   }
 
+  async function clearEditor(editor, isCancelled) {
+    if (!editor) return false;
+    const hasContent = () => A.editorText(editor).trim().length > 0 || chipCount(editor) > 0;
+    if (!hasContent()) return true;
+
+    await focusEditorEnd(editor, isCancelled);
+    for (let attempt = 1; attempt <= 2 && hasContent(); attempt++) {
+      if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
+        await A.pressKey('a', 'KeyA', 65, 4).catch(() => {}); // Meta+A (macOS)
+        await A.pressKey('a', 'KeyA', 65, 2).catch(() => {}); // Ctrl+A
+        await A.pressKey('Backspace', 'Backspace', 8).catch(() => {});
+        if (hasContent()) {
+          editor.value = '';
+          editor.dispatchEvent(new Event('input', { bubbles: true }));
+          editor.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } else {
+        await A.pressKey('a', 'KeyA', 65, 4).catch(() => {});
+        await A.pressKey('a', 'KeyA', 65, 2).catch(() => {});
+        await A.pressKey('Backspace', 'Backspace', 8).catch(() => {});
+        await A.sleep(120, isCancelled);
+        if (hasContent()) {
+          try {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(editor);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand('delete', false, null);
+          } catch (_) {}
+        }
+        if (hasContent()) {
+          editor.innerHTML = '';
+          editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+        }
+      }
+      await A.sleep(150, isCancelled);
+    }
+    if (!hasContent()) A.log('Cleared existing text/chips from prompt box');
+    await focusEditorEnd(editor, isCancelled);
+    return true;
+  }
+
   const chipCount = (editor) => findIn(editor, S().promptChipInEditor).length;
   const visiblePopovers = (editor) =>
     A.allVisible(S().mentionPopover)
@@ -1530,7 +1573,8 @@
         return false;
       }
       await focusEditorEnd(editor, isCancelled);
-      await A.sleep(600, isCancelled, true);
+      await clearEditor(editor, isCancelled);
+      await A.sleep(400, isCancelled, true);
 
       const isFrame =
         cfg.mode === 'imageToVideo' || !!(cfg.outputPreviousPrompt && cfg.outputPreviousPrompt.extractedFrame);
@@ -1773,10 +1817,42 @@
   /* =====================================================================
    * Wait For Results & Download
    * ===================================================================== */
+  function detectFlowErrorOnPage() {
+    const sels = ['mat-snack-bar-container', '.mat-mdc-snack-bar-container', '[role="alert"]', '.error-message', '[class*="error-banner"]'];
+    for (const sel of sels) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (!A.isVisibleEl(el)) continue;
+        const t = (el.innerText || el.textContent || '').trim();
+        if (t && /error|limit|ingredient|character|not supported|failed|violate|try again/i.test(t)) return t;
+      }
+    }
+    return '';
+  }
+
+  function warnIfVeoLimit(cfg, reason) {
+    if (!/\bveo\b/i.test(cfg.model || '')) return;
+    const charCount = (cfg.characters && cfg.characters.length) || 0;
+    const imgCount = (cfg.images && cfg.images.length) || 0;
+    const msg = `Veo 3.1 models (${cfg.model}) have a 2-ingredient/character limit in Flow and may fail or stall at 0%. Switch to "Omni 1.1 Flash" or "Omni 1.2 Flash" for multi-character scenes.${reason ? ' (' + reason.slice(0, 120) + ')' : ''}`;
+    A.warn(msg);
+    try {
+      chrome.runtime.sendMessage({
+        type: 'MODEL_LIMIT_WARNING',
+        data: {
+          model: cfg.model,
+          recommended: ['Omni 1.1 Flash', 'Omni 1.2 Flash'],
+          reason: reason || `Veo model ${cfg.model} stalled/failed (${charCount} chars, ${imgCount} imgs)`
+        }
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
   async function waitForResults(refs, cfg, isCancelled) {
     const isVideo = cfg.mode.includes('ToVideo');
     const want = cfg.outputCount || refs.length;
     const maxPolls = 450;
+    let warnedModelLimit = false;
+    let zeroPctPolls = 0;
     for (let poll = 0; poll < maxPolls; poll++) {
       if (isCancelled && isCancelled()) return { success: false };
       // Check for any approval prompts that appeared during generation
@@ -1815,8 +1891,27 @@
       }
       const pct = Math.round(pctSum / refs.length);
       const ready = (isVideo ? videos : images).slice(0, want);
+      if (pct === 0 && ready.length === 0) zeroPctPolls++;
+      else zeroPctPolls = 0;
+
+      if (!warnedModelLimit && /\bveo\b/i.test(cfg.model || '')) {
+        const pageErr = detectFlowErrorOnPage();
+        const multiIng = ((cfg.characters && cfg.characters.length) || 0) >= 2 || ((cfg.images && cfg.images.length) || 0) >= 2 || cfg.mode === 'componentsToVideo';
+        if (pageErr && /ingredient|character|limit|max|not supported|failed/i.test(pageErr)) {
+          warnedModelLimit = true;
+          warnIfVeoLimit(cfg, pageErr);
+        } else if (zeroPctPolls >= 15 && multiIng) {
+          warnedModelLimit = true;
+          warnIfVeoLimit(cfg, 'Stalled at 0% with multiple characters/ingredients');
+        }
+      }
+
       A.log(`Generating: ${pct}% - ${ready.length}/${want} ready`);
       const done = ready.length + errors.length >= want;
+      if (done && errors.length > 0 && !warnedModelLimit) {
+        warnedModelLimit = true;
+        warnIfVeoLimit(cfg, detectFlowErrorOnPage() || 'Generation failed');
+      }
       try {
         chrome.runtime.sendMessage({
           type: 'VIDEO_GENERATION_PROGRESS',
@@ -1836,10 +1931,45 @@
   }
 
   const sanitize = (s) =>
-    s
+    String(s || '')
       .replace(/[/\\?%*:|"<>]/g, '-')
       .replace(/^[-.]+|[-.]+$/g, '')
       .trim();
+
+  function getProjectName() {
+    const sels = [
+      'input[aria-label*="project" i]',
+      'input[aria-label*="title" i]',
+      '[data-testid*="project-name" i]',
+      '[data-testid*="project-title" i]',
+      'flow-project-header h1',
+      'flow-project-header input',
+      'header input',
+      'header h1',
+      '[class*="project-title" i]',
+      '[class*="projectName" i]'
+    ];
+    let raw = '';
+    for (const sel of sels) {
+      const el = document.querySelector(sel);
+      if (!el || !A.isVisibleEl(el)) continue;
+      const v = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? el.value : el.innerText || el.textContent || '').trim();
+      if (v && v.length >= 2 && !/^(google\s*flow|flow|labs)$/i.test(v)) {
+        raw = v;
+        break;
+      }
+    }
+    if (!raw) {
+      raw = String(document.title || '')
+        .replace(/\s*[-|–—]\s*(Google\s+)?Flow.*$/i, '')
+        .replace(/\s*[-|–—]\s*Labs.*$/i, '')
+        .replace(/\s*[-|–—]\s*Google.*$/i, '')
+        .trim();
+    }
+    if (!raw || /^(google\s*flow|flow|labs)$/i.test(raw)) raw = 'FlowProject';
+    const clean = sanitize(raw).replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+    return clean || 'FlowProject';
+  }
 
   function promptTag(prompt) {
     if (!prompt) return null;
@@ -1854,12 +1984,29 @@
     return null;
   }
 
+  function extractSceneLabel(cfg) {
+    const sm = String(cfg.prompt || '').match(/\bscene\s*[-_#:]?\s*(\d+)\b/i);
+    if (sm && sm[1]) return `Scene${parseInt(sm[1], 10)}`;
+    const tag = promptTag(cfg.prompt);
+    if (tag) return sanitize(tag).replace(/\s+/g, '_');
+    return `Scene${cfg.promptIndex || 1}`;
+  }
+
+  function formatTimestamp(date) {
+    const d = date || new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}${pad(d.getMinutes())}_${pad(d.getDate())}${pad(d.getMonth() + 1)}${d.getFullYear()}`;
+  }
+
   function fileStem(cfg, isVideo, i, total) {
     const type = isVideo ? 'video' : 'image';
     const suffix = total > 1 ? `_${i + 1}` : '';
     if (cfg.fileNamingSystem === 'simple') return `${cfg.promptIndex} ${type}${suffix}`;
-    const tag = promptTag(cfg.prompt);
-    return tag ? `${tag}${suffix}` : `${cfg.promptIndex} ${type}${suffix}`;
+    const proj = getProjectName();
+    const scene = extractSceneLabel(cfg);
+    const attempt = `v${cfg.attempt || 1}`;
+    const ts = formatTimestamp();
+    return `${proj}_${scene}_${attempt}_${ts}${suffix}`;
   }
 
   A.fileStem = fileStem;
