@@ -3,7 +3,7 @@
   "name": "AsidZ AutoFlow",
   "short_name": "AsidZ Flow",
   "description": "Batch generate videos and images on Google Flow with dock sync, character preservation, and auto-download. Official Platform: https://asidz.com",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "action": {
     "default_title": "AsidZ AutoFlow",
     "default_icon": {
@@ -34,10 +34,7 @@
     "debugger"
   ],
   "host_permissions": [
-    "*://flow.google.com/*",
-    "*://labs.google/*",
-    "*://*.googleusercontent.com/*",
-    "*://storage.googleapis.com/*"
+    "<all_urls>"
   ],
   "content_scripts": [
     {

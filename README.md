@@ -77,22 +77,47 @@ docker run -p 5050:5050 asidz-autoflow-saas
 
 ---
 
+## 🤖 Step 4: Control AutoFlow from Claude Desktop / Antigravity / Cursor (AI Agent Bridge)
+
+**AsidZ AutoFlow** includes a built-in, 100% free Local AI Agent Bridge (`bridge/asidz-agent-bridge.py`) so any local coding or video-editing AI agent can populate B-roll scene prompts, configure Flow dock settings, start batch generation, and collect downloaded files in `~/Downloads/asidz-flow/`.
+
+- **Agent Operating Manual**: See [`AGENT_BRIDGE.md`](./AGENT_BRIDGE.md) and [`CLAUDE.md`](./CLAUDE.md).
+- **One-Command B-Roll Run**:
+  ```bash
+  python3 /Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py run \
+    --mode textToVideo \
+    --aspect-ratio 9:16 \
+    --model "Veo 3.1 - Lite" \
+    --duration 6s \
+    --prompt "Scene 1 — 0–6 sec: Cinematic slow-motion close-up of rain hitting a neon street..." \
+    --prompt "Scene 2 — 6–12 sec: Aerial drone shot over a misty forest at sunrise..."
+  ```
+
+---
+
 ## 📁 Repository Structure
 
 ```text
 google-flow-autoflow/
+├── CLAUDE.md                      # Auto-loaded instructions for Claude / Antigravity
+├── AGENT_BRIDGE.md                # Full AI Agent Bridge & B-Roll operating manual
+├── bridge/
+│   └── asidz-agent-bridge.py      # Zero-dependency Python 3 CLI & stdio MCP server
 ├── extension/
-│   ├── manifest.json              # Chrome Manifest V3 configuration
+│   ├── manifest.json              # Chrome Manifest V3 configuration (v2.6.0)
 │   ├── background/
-│   │   └── service-worker.js      # Tab locking, CDP debugger session, downloads
+│   │   └── service-worker.js      # CDP debugger, downloads & Local Agent Bridge poller
 │   ├── scripts/
-│   │   └── cdp-automator.js       # Google Flow DOM injector and media detector
+│   │   ├── page-upload.js         # Main-world file input interceptor
+│   │   ├── selectors.js           # Angular/Material DOM selector map
+│   │   ├── helpers.js             # Sizzle query engine & CDP input helpers
+│   │   ├── flow.js                # Google Flow dock, character, & download automation
+│   │   └── queue.js               # Dual-worker prompt & concurrent download queue
 │   ├── sidepanel/
-│   │   ├── index.html             # Glassmorphic Side Panel UI
-│   │   ├── styles.css             # Dark burgundy aesthetic styling
-│   │   ├── app.js                 # Queue controller and asset matcher
-│   │   └── asidz-logo.png         # AsidZ brand avatar
-│   └── icons/                     # Resized 16px, 48px, 128px extension icons
+│   │   ├── index.html             # Side Panel UI
+│   │   ├── style.css              # Dark burgundy aesthetic styling
+│   │   └── app.js                 # Side panel state, model warning & live agent sync
+│   └── icons/                     # Extension icons
 └── saas-backend/
     ├── server.js                  # Node.js + node:sqlite REST API & Auth
     ├── package.json               # Backend dependencies and scripts

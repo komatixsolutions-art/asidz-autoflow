@@ -1091,6 +1091,43 @@ function wire() {
     } else if (msg.type === 'MODEL_LIMIT_WARNING' && msg.data) {
       checkModelCompatibility(msg.data.reason || 'Model ingredient/limit reached');
       toast(`Tip: Switch to ${msg.data.recommended ? msg.data.recommended[0] : 'Omni 1.1 Flash'} for multi-character scenes.`, true);
+    } else if (msg.type === 'AGENT_BRIDGE_SYNC' && msg.data) {
+      if (msg.data.settings) {
+        settings = { ...DEFAULTS, ...msg.data.settings };
+      }
+      if (typeof msg.data.promptsText === 'string') {
+        $('#prompts').value = msg.data.promptsText;
+        $('#rangeTo')._auto = true;
+      }
+      fillModelSelects();
+      bindSettings();
+      refreshUI();
+      toast(
+        msg.data.autoStart
+          ? 'AI Agent synced prompts & settings — starting AutoFlow...'
+          : 'AI Agent populated prompts & settings in AutoFlow'
+      );
+    }
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    let shouldRefresh = false;
+    if (changes[SETTINGS_KEY] && changes[SETTINGS_KEY].newValue) {
+      settings = { ...DEFAULTS, ...changes[SETTINGS_KEY].newValue };
+      shouldRefresh = true;
+    }
+    if (changes[FORM_KEY] && changes[FORM_KEY].newValue && typeof changes[FORM_KEY].newValue.prompts === 'string') {
+      if ($('#prompts').value !== changes[FORM_KEY].newValue.prompts) {
+        $('#prompts').value = changes[FORM_KEY].newValue.prompts;
+        $('#rangeTo')._auto = true;
+        shouldRefresh = true;
+      }
+    }
+    if (shouldRefresh) {
+      fillModelSelects();
+      bindSettings();
+      refreshUI();
     }
   });
 

@@ -427,6 +427,26 @@
     }
   });
 
+  /* ---------- DOM / Window Agent Bridge Listener (Serverless Fallback) ---------- */
+  window.addEventListener('message', (event) => {
+    const data = event && event.data;
+    if (!data || data.source !== 'ASIDZ_AGENT_BRIDGE') return;
+    if (data.type === 'RUN_JOB' && data.job) {
+      A.log('Received AI Agent Bridge job via DOM postMessage');
+      chrome.runtime.sendMessage({ type: 'AGENT_DOM_JOB', job: data.job }).catch(() => {});
+    }
+  });
+
+  document.addEventListener('ASIDZ_AGENT_JOB', (e) => {
+    try {
+      const job = typeof e.detail === 'string' ? JSON.parse(e.detail) : e.detail;
+      if (job) {
+        A.log('Received AI Agent Bridge job via CustomEvent');
+        chrome.runtime.sendMessage({ type: 'AGENT_DOM_JOB', job }).catch(() => {});
+      }
+    } catch (_) {}
+  });
+
   if (A.isFlowPage()) {
     A.loadSelectors();
     A.log('AsidZ AutoFlow active on Google Flow page');
