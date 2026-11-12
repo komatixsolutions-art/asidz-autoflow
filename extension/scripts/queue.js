@@ -403,6 +403,12 @@
         groups.forEach(publish);
         reply({ groups: snapshot() });
         return false;
+      case 'SCAN_MODELS':
+        A.loadSelectors()
+          .then(() => A.uiLock.run(() => A.scanModels()))
+          .then((m) => reply({ videoModels: (m && m.videoModels) || [], imageModels: (m && m.imageModels) || [] }))
+          .catch((e) => reply({ videoModels: [], imageModels: [], error: String(e && e.message ? e.message : e) }));
+        return true;
       case 'SCAN_VOICES':
         A.loadSelectors()
           .then(() => A.uiLock.run(() => A.scanVoices()))

@@ -4,7 +4,8 @@
  *
  * Responsibilities:
  * 1. CDP 1.3 Debugger Input Engine: Dispatches trusted mouse and keyboard events.
- * 2. Download File Naming Coordinator: Directs downloads to 'asidz-flow/' with proper tags and timestamps.
+ * 2. Strict Flow-Only Download Coordinator: Directs ONLY Google Flow downloads to 'asidz-flow/'
+ *    and leaves all other websites' downloads untouched in the default Chrome Downloads folder.
  * 3. Flow Tab Management & Side Panel Behavior: Keeps side panel open for Google Flow.
  */
 'use strict';
@@ -13,7 +14,8 @@ const FLOW_PATTERNS = ['*://flow.google.com/*', '*://labs.google/fx/*'];
 
 /* ---------------- Download naming state ---------------- */
 let folderPrefix = 'asidz-flow/'; // default folder
-let namePrefix = '';              // tag prefix for files Flow downloads itself
+let namePrefix = '';              // tag prefix for files Flow downloads itself (upscaled)
+let upscaleSessionUntil = 0;      // timestamp until which Flow native upscale downloads are intercepted
 let autoRename = true;
 let renameOffTimer = null;
 const plannedNames = new Map();   // url -> "folder/file.ext"
@@ -21,29 +23,74 @@ let handledDownloads = 0;
 
 const cleanSlashes = (s) => String(s || '').trim().replace(/^[/\\]+|[/\\]+$/g, '');
 
+function isStrictFlowHost(urlStr) {
+  if (!urlStr) return false;
+  try {
+    const u = new URL(urlStr);
+    return (
+      u.hostname === 'flow.google.com' ||
+      (u.hostname === 'labs.google' && u.pathname.startsWith('/fx'))
+    );
+  } catch (_) {
+    return urlStr.includes('flow.google.com') || urlStr.includes('labs.google/fx');
+  }
+}
+
 function onDeterminingFilename(item, suggest) {
+  if (!autoRename) return;
   const url = item.url || '';
-  const fromFlow = url.includes('google') || url.startsWith('data:') || url.startsWith('blob:') || url.includes('flow');
-  const fromUs = !item.byExtensionId || item.byExtensionId === chrome.runtime.id;
-  if (!fromFlow || !fromUs || !autoRename) return;
+  const ref = item.referrer || '';
+  const finalUrl = item.finalUrl || '';
+
+  // Case 1: Explicitly requested by our extension via DOWNLOAD_RESOURCE (plannedNames)
+  if (plannedNames.has(url)) {
+    const dest = plannedNames.get(url).replace(/^[/\\]+/, '');
+    plannedNames.delete(url);
+    handledDownloads++;
+    suggest({ filename: dest, conflictAction: 'uniquify' });
+    return;
+  }
+
+  // Case 2: Triggered by our extension directly without plannedNames map entry
+  const initiatedByOurExtension = item.byExtensionId === chrome.runtime.id;
+
+  // Case 3: Native upscale download initiated by Google Flow page itself
+  // MUST have a strict Flow referrer/URL OR be inside an active upscale request window
+  const initiatedByFlowPage =
+    !item.byExtensionId &&
+    (isStrictFlowHost(ref) ||
+      isStrictFlowHost(url) ||
+      isStrictFlowHost(finalUrl) ||
+      (Date.now() < upscaleSessionUntil &&
+        (url.includes('googleusercontent.com') ||
+          url.includes('storage.googleapis.com') ||
+          url.startsWith('blob:') ||
+          url.startsWith('data:'))));
+
+  // Strictly ignore downloads from any other website or extension!
+  if (!initiatedByOurExtension && !initiatedByFlowPage) {
+    return;
+  }
 
   const nameOrUrl = item.filename || url;
   const isVideo = /\.(mp4|webm|mov)$/i.test(nameOrUrl) || (item.mime || '').startsWith('video/');
-  const isImage = /\.(jpg|jpeg|png|gif|webp|bmp|jfif)$/i.test(nameOrUrl) || (item.mime || '').startsWith('image/') || url.startsWith('data:image');
+  const isImage =
+    /\.(jpg|jpeg|png|gif|webp|bmp|jfif)$/i.test(nameOrUrl) ||
+    (item.mime || '').startsWith('image/') ||
+    url.startsWith('data:image');
   if (!isVideo && !isImage) return;
+
   handledDownloads++;
 
-  if (plannedNames.has(url)) {
-    suggest({ filename: plannedNames.get(url).replace(/^[/\\]+/, ''), conflictAction: 'uniquify' });
-    plannedNames.delete(url);
-    return;
-  }
   const original = item.filename || '';
   const base = original.split(/[/\\]/).pop() || original;
-  const ext = base.includes('.') ? '.' + base.split('.').pop() : (isVideo ? '.mp4' : '.png');
+  const ext = base.includes('.') ? '.' + base.split('.').pop() : isVideo ? '.mp4' : '.png';
   let fn;
-  if (namePrefix && namePrefix.trim()) fn = folderPrefix + namePrefix.trim().replace(/_+$/, '') + ext;
-  else fn = folderPrefix + (base || 'asidz_download' + ext);
+  if (namePrefix && namePrefix.trim()) {
+    fn = folderPrefix + namePrefix.trim().replace(/_+$/, '') + ext;
+  } else {
+    fn = folderPrefix + (base || 'asidz_download' + ext);
+  }
   suggest({ filename: fn.replace(/^[/\\]+/, ''), conflictAction: 'uniquify' });
 }
 
@@ -159,6 +206,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (typeof msg.folderName === 'string') folderPrefix = msg.folderName.trim() ? cleanSlashes(msg.folderName) + '/' : 'asidz-flow/';
       if (typeof msg.prefix === 'string') namePrefix = msg.prefix.trim();
       if (typeof msg.autoChangeFileName === 'boolean') autoRename = msg.autoChangeFileName;
+      // Mark active upscale download window (3 minutes)
+      upscaleSessionUntil = Date.now() + 180000;
       if (renameOffTimer) { clearTimeout(renameOffTimer); renameOffTimer = null; }
       enableRename(autoRename);
       reply({ success: true });
@@ -178,7 +227,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const st = msg.data && msg.data.status;
       if (st === 'completed' || st === 'cancelled' || st === 'error') {
         if (renameOffTimer) clearTimeout(renameOffTimer);
-        renameOffTimer = setTimeout(() => { namePrefix = ''; renameOffTimer = null; }, 300000);
+        renameOffTimer = setTimeout(() => {
+          namePrefix = '';
+          upscaleSessionUntil = 0;
+          renameOffTimer = null;
+        }, 120000);
       }
       return false;
     }

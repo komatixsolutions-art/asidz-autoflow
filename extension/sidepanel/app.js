@@ -4,6 +4,7 @@
  *
  * Coordinates:
  * - 6 Generation Modes (Text-to-Video, Frame-to-Video, Ingredients-to-Video, Text-to-Image, Image-to-Image, Agent)
+ * - Dynamic Model Sync from Google Flow (Video & Image models including Omni 1.2 Flash, Veo 3.1, Nano Banana)
  * - Flow Dock synchronization (Aspect Ratio, Output Count x1-x4, Model picker, Durations & Concat Chains)
  * - Intelligent Character Tagging (@character preservation) & Voice Library Sync
  * - Dual-worker background queue execution & real-time log streaming
@@ -16,6 +17,7 @@ const FORM_KEY = 'asidz_form';
 const CHARS_KEY = 'asidz_scanned_characters';
 const SELECTORS_KEY = 'asidz_custom_selectors';
 const VOICES_KEY = 'asidz_scanned_voices';
+const MODELS_KEY = 'asidz_scanned_models';
 const CHUNK = 1024 * 1024;
 
 const DEFAULTS = {
@@ -49,8 +51,42 @@ const DEFAULTS = {
   zoomOutWhileRunning: true
 };
 
-const IMAGE_MODELS = ['Nano Banana Pro', 'Nano Banana 2.1', 'Nano Banana 2.1 Light'];
-const VIDEO_MODELS = ['Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Omni 1.1 Flash'];
+const BUILTIN_IMAGE_MODELS = ['Nano Banana Pro', 'Nano Banana 2.1', 'Nano Banana 2.1 Light'];
+const BUILTIN_VIDEO_MODELS = [
+  'Veo 3.1 - Lite',
+  'Veo 3.1 - Fast',
+  'Veo 3.1 - Quality',
+  'Omni 1.2 Flash',
+  'Omni 1.1 Flash'
+];
+
+let IMAGE_MODELS = BUILTIN_IMAGE_MODELS.slice();
+let VIDEO_MODELS = BUILTIN_VIDEO_MODELS.slice();
+let scannedVideoModels = [];
+let scannedImageModels = [];
+
+function mergeModels() {
+  // If user synced models from Flow, reflect the live Flow models while keeping built-ins as fallback if empty
+  if (scannedVideoModels.length > 0) {
+    const combinedV = [...scannedVideoModels];
+    BUILTIN_VIDEO_MODELS.forEach((m) => {
+      if (!combinedV.some((x) => x.toLowerCase() === m.toLowerCase())) combinedV.push(m);
+    });
+    VIDEO_MODELS = combinedV;
+  } else {
+    VIDEO_MODELS = BUILTIN_VIDEO_MODELS.slice();
+  }
+
+  if (scannedImageModels.length > 0) {
+    const combinedI = [...scannedImageModels];
+    BUILTIN_IMAGE_MODELS.forEach((m) => {
+      if (!combinedI.some((x) => x.toLowerCase() === m.toLowerCase())) combinedI.push(m);
+    });
+    IMAGE_MODELS = combinedI;
+  } else {
+    IMAGE_MODELS = BUILTIN_IMAGE_MODELS.slice();
+  }
+}
 
 const BUILTIN_VOICES = [
   ['Achernar', 'Female', 'Soft'], ['Achird', 'Male', 'Friendly'], ['Algenib', 'Male', 'Gravelly'], ['Algieba', 'Male', 'Smooth'],
@@ -112,16 +148,21 @@ function toast(msg, isErr) {
 /* ---------------- storage ---------------- */
 async function loadAll() {
   const st = await chrome.storage.local.get([
-    SETTINGS_KEY, FORM_KEY, CHARS_KEY, SELECTORS_KEY, VOICES_KEY,
+    SETTINGS_KEY, FORM_KEY, CHARS_KEY, SELECTORS_KEY, VOICES_KEY, MODELS_KEY,
     'aws_settings', 'aws_form', 'aws_scanned_characters', 'aws_custom_selectors', 'aws_scanned_voices',
     'autoflowCharacters', 'autoflowSettings'
   ]);
-  
+
   settings = {
     ...DEFAULTS,
     ...(st[SETTINGS_KEY] || st.aws_settings || st.autoflowSettings || {})
   };
   if (!Array.isArray(settings.defaultCharacters)) settings.defaultCharacters = [];
+
+  const savedModels = st[MODELS_KEY] || {};
+  if (Array.isArray(savedModels.videoModels)) scannedVideoModels = savedModels.videoModels;
+  if (Array.isArray(savedModels.imageModels)) scannedImageModels = savedModels.imageModels;
+  mergeModels();
 
   const rawChars = st[CHARS_KEY] || st.aws_scanned_characters || st.autoflowCharacters || [];
   const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
@@ -159,6 +200,46 @@ function numeric(key) {
   return typeof DEFAULTS[key] === 'number';
 }
 
+function fillModelSelects() {
+  const vm = $('#q_model');
+  const im = $('#q_imageModel');
+  if (vm) {
+    const curV = settings.model;
+    vm.innerHTML = '';
+    VIDEO_MODELS.forEach((m) => {
+      const isSynced = scannedVideoModels.includes(m) && !BUILTIN_VIDEO_MODELS.includes(m);
+      vm.add(new Option(isSynced ? `${m} (from Flow)` : m, m));
+    });
+    if (VIDEO_MODELS.includes(curV)) {
+      vm.value = curV;
+    } else if (VIDEO_MODELS.length) {
+      vm.value = VIDEO_MODELS[0];
+      settings.model = vm.value;
+    }
+  }
+  if (im) {
+    const curI = settings.imageModel;
+    im.innerHTML = '';
+    IMAGE_MODELS.forEach((m) => {
+      const isSynced = scannedImageModels.includes(m) && !BUILTIN_IMAGE_MODELS.includes(m);
+      im.add(new Option(isSynced ? `${m} (from Flow)` : m, m));
+    });
+    if (IMAGE_MODELS.includes(curI)) {
+      im.value = curI;
+    } else if (IMAGE_MODELS.length) {
+      im.value = IMAGE_MODELS[0];
+      settings.imageModel = im.value;
+    }
+  }
+  const mc = $('#modelCount');
+  if (mc) {
+    const totalSynced = scannedVideoModels.length + scannedImageModels.length;
+    mc.textContent = totalSynced
+      ? `${VIDEO_MODELS.length} video, ${IMAGE_MODELS.length} image (${totalSynced} synced from Flow)`
+      : `${VIDEO_MODELS.length} video, ${IMAGE_MODELS.length} image (built-in)`;
+  }
+}
+
 function bindSettings() {
   $$('[data-setting]').forEach((el) => {
     const key = el.dataset.setting;
@@ -167,7 +248,7 @@ function bindSettings() {
     else el.value = v == null ? '' : String(v);
 
     if (el.tagName === 'SELECT' && el.value !== String(v) && el.options.length) {
-      el.value = String(DEFAULTS[key]);
+      el.value = String(DEFAULTS[key] || el.options[0].value);
       settings[key] = numeric(key) ? Number(el.value) : el.value;
     }
     if (el._bound) return;
@@ -423,7 +504,6 @@ function renderChars() {
       : 'Click to always include this character';
     b.addEventListener('click', () => {
       if (settings.enableCharacterControl) {
-        // In auto mode, clicking character appends @character to the active prompt textarea
         const p = $('#prompts');
         p.value = p.value ? `${p.value.trim()} @${c}\n` : `@${c} `;
         saveForm();
@@ -547,7 +627,7 @@ async function start() {
 
   const outputCount = anyConcat ? 1 : Number(settings.mode === 'agentAutomation' ? settings.agentOutputCount : settings.outputCount);
   const concurrent = anyConcat || settings.mode === 'agentAutomation' ? 1 : Number(settings.concurrentPrompts);
-  
+
   const payloads = prompts.map((p, i) => ({
     prompt: p,
     mode,
@@ -750,7 +830,41 @@ function wire() {
     refreshUI();
   });
 
+  fillModelSelects();
   fillVoiceSelect();
+
+  const scanModelsBtn = $('#scanModelsBtn');
+  if (scanModelsBtn) {
+    scanModelsBtn.addEventListener('click', async () => {
+      const tab = await getActiveTab();
+      if (!tab || !isFlowUrl(tab.url)) return toast('Open a Google Flow project first.', true);
+      scanModelsBtn.disabled = true;
+      try {
+        const r = await sendToTab(tab.id, { type: 'SCAN_MODELS' });
+        const vList = (r && r.videoModels) || [];
+        const iList = (r && r.imageModels) || [];
+        if (!vList.length && !iList.length) {
+          toast('Could not read models from Flow — make sure a Flow project is open.', true);
+          return;
+        }
+        if (vList.length) scannedVideoModels = vList;
+        if (iList.length) scannedImageModels = iList;
+        await chrome.storage.local.set({
+          [MODELS_KEY]: { videoModels: scannedVideoModels, imageModels: scannedImageModels }
+        });
+        mergeModels();
+        fillModelSelects();
+        bindSettings();
+        saveSettings();
+        refreshUI();
+        toast(`Synced ${vList.length} video & ${iList.length} image model(s) from Flow`);
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        scanModelsBtn.disabled = false;
+      }
+    });
+  }
 
   $('#scanVoicesBtn').addEventListener('click', async () => {
     const tab = await getActiveTab();
@@ -835,7 +949,7 @@ function wire() {
       scannedChars = ((r && r.characters) || [])
         .map((c) => String(c).replace(/^@+/, '').trim())
         .filter((c) => c && c.length >= 2 && !blocked.has(c.toLowerCase()));
-      
+
       settings.defaultCharacters = settings.defaultCharacters.filter((c) => scannedChars.includes(c));
       await chrome.storage.local.set({
         [CHARS_KEY]: scannedChars,
@@ -896,6 +1010,7 @@ function wire() {
     if (!confirm('Reset all settings to AsidZ defaults?')) return;
     settings = { ...DEFAULTS };
     await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+    fillModelSelects();
     bindSettings();
     refreshUI();
     toast('Settings reset to defaults.');

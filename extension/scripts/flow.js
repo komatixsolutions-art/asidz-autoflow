@@ -850,7 +850,8 @@
     'veo 3.1 light': ['Veo Light'],
     'veo 3.1 fast': ['Veo Fast'],
     'veo 3.1 quality': ['Veo Quality'],
-    'omni 1.1 flash': ['Gemini Omni Flash 1.1', 'Omni Flash 1.1', 'Gemini Omni Flash', 'Omni Flash']
+    'omni 1.2 flash': ['Gemini Omni Flash 1.2', 'Omni Flash 1.2', 'Flash 1.2', 'Omni 1.2', 'Omni Flash'],
+    'omni 1.1 flash': ['Gemini Omni Flash 1.1', 'Omni Flash 1.1', 'Gemini Omni Flash', 'Omni Flash', 'Omni 1.2 Flash', 'Flash 1.2']
   };
 
   const modelCandidates = (model) => [model, ...(MODEL_ALIASES[normModel(model)] || [])];
@@ -904,6 +905,67 @@
     return false;
   }
   A.selectModel = selectModel;
+
+  // Dynamically scan available Video & Image models directly from Flow dock
+  A.scanModels = async function () {
+    const s = S();
+    await A.attachDebugger();
+    const videoModels = [];
+    const imageModels = [];
+    const cleanModelLabel = (raw) => {
+      return String(raw || '')
+        .split('\n')
+        .map((x) => x.trim())
+        .filter((x) => x && !/^(new|beta|leaving.*|deprecated.*|lower priority|fast|quality|recommended)$/i.test(x))[0] || '';
+    };
+
+    const readCurrentDropdown = async () => {
+      const itemsSel = s.modelItems || 'flow-menu-item button';
+      await A.click(s.modelSelectButton, 'Model dropdown');
+      await A.waitFor(itemsSel, undefined, 3000);
+      const opts = A.allVisible(itemsSel);
+      const found = [];
+      for (const el of opts) {
+        let txt = cleanModelLabel(el.innerText || el.textContent || '');
+        txt = txt.replace(/\s*Leaving\s+\d+\s+[A-Za-z]+/i, '').replace(/\s+/g, ' ').trim();
+        if (txt && txt.length >= 2 && txt.length <= 50 && !found.includes(txt)) {
+          found.push(txt);
+        }
+      }
+      await A.pressEscape().catch(() => {});
+      await A.sleep(300);
+      return found;
+    };
+
+    try {
+      await A.click(s.configButton, 'Settings button');
+      await A.sleep(350);
+
+      // 1) Scan Video Models
+      if (A.q(s.selectVideoMode).length > 0) {
+        await A.click(s.selectVideoMode, 'Video mode').catch(() => {});
+        await A.sleep(350);
+        const vList = await readCurrentDropdown();
+        vList.forEach((m) => { if (!videoModels.includes(m)) videoModels.push(m); });
+      }
+
+      // 2) Scan Image Models
+      if (A.q(s.selectImageMode).length > 0) {
+        await A.click(s.selectImageMode, 'Image mode').catch(() => {});
+        await A.sleep(350);
+        const iList = await readCurrentDropdown();
+        iList.forEach((m) => { if (!imageModels.includes(m)) imageModels.push(m); });
+      }
+
+      await A.click(s.configButtonActived, 'Close settings').catch(() => A.pressEscape());
+    } catch (e) {
+      A.warn('Model scan warning:', e.message || e);
+      try { await A.pressEscape(); } catch (_) {}
+    }
+
+    A.log(`Scanned Flow models — Video: [${videoModels.join(', ')}], Image: [${imageModels.join(', ')}]`);
+    return { videoModels, imageModels };
+  };
 
   /* =====================================================================
    * Configure Video & Image Dock Settings
@@ -1747,7 +1809,7 @@
           videos = videos.concat(st.videos);
           images = images.concat(st.images);
           pctSum += 100;
-        } else {
+        } else if (poll >= 15) {
           errors.push(refs[k]);
         }
       }
@@ -1839,7 +1901,8 @@
 
       if (quality === '1080' || quality === '2k' || quality === '4k') {
         const optSel = quality === '2k' ? s.quality2KOption : quality === '4k' ? s.quality4KOption : s.quality1080Option;
-        const retries = cfg.maxRetries || 3;
+        const retries = cfg.maxRetries || 2;
+        let upscaleTriggered = false;
         for (let k = 0; k < okRefs.length; k++) {
           const stem = fileStem(cfg, isVideo, k, okRefs.length);
           await A.bg({ type: 'SET_FOLDER_NAME', folderName: folder, prefix: `${stem}_`, autoChangeFileName: autoName });
@@ -1848,35 +1911,44 @@
           for (let a = 1; a <= retries && !ok; a++) {
             try {
               await A.uiLock.run(async () => {
-                A.log(`Tile ${k + 1}/${okRefs.length}: downloading ${quality} (try ${a}/${retries})`);
+                A.log(`Tile ${k + 1}/${okRefs.length}: requesting ${quality} download (try ${a}/${retries})`);
                 const tile = resolveTile(okRefs[k]);
                 await A.hover(tile, `Tile ${k + 1}`, isCancelled);
-                if (await A.waitFor(`${tile} ${s.moreOptionsButtonInHoverTile}`, isCancelled))
+                if (await A.waitFor(`${tile} ${s.moreOptionsButtonInHoverTile}`, isCancelled, 2500))
                   await A.click(`${tile} ${s.moreOptionsButtonInHoverTile}`, 'More options', isCancelled);
-                if (await A.waitFor(s.downloadButtonInHoverTile, isCancelled))
+                if (await A.waitFor(s.downloadButtonInHoverTile, isCancelled, 2500)) {
                   await A.hover(s.downloadButtonInHoverTile, 'Download menu', isCancelled);
-                await A.click(optSel, `${quality} option`, isCancelled);
+                  await A.sleep(300, isCancelled);
+                }
+                if (A.q(optSel).length > 0) {
+                  await A.click(optSel, `${quality} option`, isCancelled, 2500);
+                } else {
+                  await A.click(s.downloadButtonInHoverTile, 'Direct download menu item', isCancelled, 2500);
+                }
               });
               ok = true;
               A.log(`Tile ${k + 1}: ${quality} download requested`);
             } catch (e) {
               if (A.isCancelErr(e)) throw e;
-              try {
-                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-              } catch (_) {}
-              if (a < retries) await A.sleep(1000, isCancelled);
+              try { await A.pressEscape(); } catch (_) {}
+              if (a < retries) await A.sleep(800, isCancelled);
             }
           }
-          if (!ok) continue;
-          if (autoName && mark && typeof mark.count === 'number') {
-            for (let w = 0; w < 180; w++) {
+          if (ok && mark && typeof mark.count === 'number') {
+            for (let w = 0; w < 45; w++) {
               const now = await A.bg({ type: 'DOWNLOAD_COUNTER' });
-              if (now && now.count > mark.count) break;
+              if (now && now.count > mark.count) {
+                upscaleTriggered = true;
+                break;
+              }
               await A.sleep(1000, isCancelled);
             }
           }
         }
-        return { success: true, ...(await chainOutput()) };
+        if (upscaleTriggered) {
+          return { success: true, ...(await chainOutput()) };
+        }
+        A.warn(`${quality} menu download did not start within 45s — falling back to direct media stream download`);
       }
 
       A.log(`Downloading ${res.resources.length} file(s) for prompt #${cfg.promptIndex}`);

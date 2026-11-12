@@ -84,7 +84,8 @@
               <option value="Veo 3.1 - Lite">Veo 3.1 - Lite</option>
               <option value="Veo 3.1 - Fast">Veo 3.1 - Fast</option>
               <option value="Veo 3.1 - Quality">Veo 3.1 - Quality</option>
-              <option value="Omni 1.1 Flash">Omni 1.1 Flash (Omni Flash)</option>
+              <option value="Omni 1.2 Flash">Omni 1.2 Flash</option>
+              <option value="Omni 1.1 Flash">Omni 1.1 Flash</option>
             </select>
           </label>
           <label class="field image-only"><span>Image model</span>
@@ -107,6 +108,10 @@
               <option value="new-image-concat">Chain: edit previous image</option>
             </select>
           </label>
+        </div>
+        <div class="row-gap">
+          <button class="btn tiny ghost" id="scanModelsBtn">Sync models from Flow</button>
+          <span class="muted small" id="modelCount"></span>
         </div>
         <p class="hint" id="chainHint">Extend chain: each next prompt starts from the last frame / image of the previous one (sequential).</p>
       </div>
