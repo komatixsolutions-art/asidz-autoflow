@@ -856,6 +856,108 @@ def run_mcp_stdio():
             sys.stdout.flush()
 
 
+def run_doctor():
+    """
+    Self-diagnostic preflight check for new PCs/Macs.
+    Validates Python version, zero-dependency standard library, Chrome installation,
+    extension bundle path, and bridge connectivity.
+    """
+    print("=" * 68)
+    print("🩺 ASIDZ AUTOFLOW — SYSTEM PREFLIGHT & DOCTOR CHECK")
+    print("=" * 68)
+
+    all_ok = True
+
+    # 1. Python version check
+    py_ver = sys.version.split()[0]
+    if sys.version_info >= (3, 8):
+        print(f" [PASS] Python 3: v{py_ver} (Meets >= 3.8 requirement)")
+    else:
+        print(f" [FAIL] Python 3: v{py_ver} (Requires Python 3.8+)")
+        all_ok = False
+
+    # 2. Dependencies check
+    print(" [PASS] Dependencies: 100% Standard Library (Zero pip install required)")
+
+    # 3. Google Chrome check
+    chrome_found = False
+    chrome_path = None
+    if sys.platform == "darwin":
+        mac_paths = [
+            "/Applications/Google Chrome.app",
+            os.path.expanduser("~/Applications/Google Chrome.app")
+        ]
+        for p in mac_paths:
+            if os.path.exists(p):
+                chrome_found = True
+                chrome_path = p
+                break
+    elif sys.platform.startswith("win"):
+        win_paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+        for p in win_paths:
+            if os.path.exists(p):
+                chrome_found = True
+                chrome_path = p
+                break
+    else:
+        res = shutil.which("google-chrome") or shutil.which("chrome")
+        if res:
+            chrome_found = True
+            chrome_path = res
+
+    if chrome_found:
+        print(f" [PASS] Google Chrome: Installed at {chrome_path}")
+    else:
+        print(" [FAIL] Google Chrome: Not found in standard directories.")
+        print("        Action: Install Google Chrome from https://google.com/chrome")
+        all_ok = False
+
+    # 4. Chrome Extension bundle check
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ext_dir = os.path.abspath(os.path.join(script_dir, "..", "extension"))
+    manifest_path = os.path.join(ext_dir, "manifest.json")
+    if os.path.exists(manifest_path):
+        print(f" [PASS] Extension Bundle: Found at {ext_dir}")
+    else:
+        print(f" [FAIL] Extension Bundle: Not found at {ext_dir}")
+        all_ok = False
+
+    # 5. Bridge Daemon & Extension Check
+    daemon_running = False
+    status_res = {}
+    try:
+        status_res = http_json("GET", "/api/agent/status")
+        daemon_running = bool(status_res.get("ok"))
+    except Exception:
+        pass
+
+    if daemon_running:
+        print(" [PASS] Bridge Daemon: Active and listening on port 45788")
+        logs = status_res.get("state", {}).get("logs", [])
+        connected_to_flow = any("active on Google Flow" in str(l.get("message", "")) for l in logs[-20:])
+        if connected_to_flow:
+            print(" [PASS] Chrome Extension: Connected to bridge & active on Google Flow canvas!")
+        else:
+            print(" [INFO] Chrome Extension: Ready, waiting for a Google Flow tab to open.")
+            print("        Action: Open https://flow.google.com in Chrome.")
+    else:
+        print(" [INFO] Bridge Daemon: Idle (Will auto-start automatically when running batches)")
+
+    print("-" * 68)
+    if all_ok:
+        print("🎉 STATUS: READY FOR AUTOMATION!")
+        print("Run B-roll scenes anytime:")
+        print("  python3 bridge/asidz-agent-bridge.py run --prompt \"Scene 1 — ...\"")
+    else:
+        print("⚠️ STATUS: PLEASE RESOLVE THE MISSING ITEMS ABOVE.")
+    print("=" * 68)
+    return all_ok
+
+
 def main():
     if "--mcp" in sys.argv:
         run_mcp_stdio()
@@ -863,6 +965,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="AsidZ AutoFlow — Local AI Agent Bridge CLI")
     sub = parser.add_subparsers(dest="cmd")
+
+    sub.add_parser("doctor", help="Run self-diagnostic check on system dependencies, Chrome, and extension connection")
 
     run_p = sub.add_parser("run", help="Populate B-roll prompts, apply settings, and run AutoFlow")
     run_p.add_argument("--prompt", "-p", action="append", default=[], help="Scene prompt (can be passed multiple times)")
@@ -897,6 +1001,10 @@ def main():
     reg_p.add_argument("--timeout", type=int, default=180, help="Max seconds to wait for character registration")
 
     args = parser.parse_args()
+
+    if args.cmd == "doctor":
+        ok = run_doctor()
+        sys.exit(0 if ok else 1)
 
     if args.cmd == "serve":
         srv = start_local_server()

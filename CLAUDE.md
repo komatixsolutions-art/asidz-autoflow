@@ -4,13 +4,36 @@ Whenever the user asks you to **generate B-rolls, video scenes, or story sequenc
 
 ---
 
+## 0. Zero-Config Environment & Requirements (For Any New PC or Mac)
+
+Before running B-rolls or video batches on a new machine, you can run the diagnostic check:
+
+```bash
+# From repository root:
+python3 bridge/asidz-agent-bridge.py doctor
+
+# Or from an adjacent workspace (e.g. AsidzAutoFlow_Projects):
+python3 ../google-flow-autoflow/bridge/asidz-agent-bridge.py doctor
+```
+
+### Essential Requirements (Only 2 things needed):
+1. **Google Chrome (v116+):** Required for Google Flow and Chrome's native `sidePanel` and `debugger` (CDP) APIs.
+2. **Python 3 (v3.8+):** Uses 100% Python Standard Library (`urllib`, `http.server`, etc.). **Zero pip packages or virtualenvs required!**
+3. **Google Account:** User must be logged in to [https://flow.google.com](https://flow.google.com) in Chrome.
+4. **AsidZ AutoFlow Extension (One-time 2-minute setup):**
+   - Open Chrome to `chrome://extensions`.
+   - Enable **Developer mode** (top-right toggle).
+   - Click **Load unpacked** (top-left) and select the `extension/` folder.
+   - Pin **AsidZ AutoFlow** to the Chrome toolbar.
+
+---
+
 ## 1. How It Works (Zero Additional Setup Needed)
 
 All execution is handled by the **AsidZ AutoFlow Bridge**:
-- **Bridge CLI Path:** `/Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py`
-- When you run this Python script, it automatically:
+- When you run the Python bridge script, it automatically:
   1. Activates Google Chrome and focuses the Google Flow tab (or opens the target project URL).
-  2. Automatically reveals the docked Chrome side panel via `Cmd+Shift+U`.
+  2. Automatically reveals the docked Chrome side panel via `Cmd+Shift+U` (Mac) / `Ctrl+Shift+U` (Windows).
   3. Configures Flow dock settings (mode, ratio, model, duration, outputs).
   4. Scans and injects Google Flow character chips (e.g., `@Aarav`, `@Bruno`).
   5. Monitors generation progress (0% → 100%) and retries automatically if Flow stalls.
@@ -38,15 +61,20 @@ Before running the bridge, always ask the user to confirm generation settings (p
 
 ## 3. Standard Execution Commands
 
+### Locate the Bridge Script Dynamically
+Find `asidz-agent-bridge.py` relative to your workspace:
+- Inside repo: `BRIDGE="bridge/asidz-agent-bridge.py"`
+- Inside projects workspace: `BRIDGE="../google-flow-autoflow/bridge/asidz-agent-bridge.py"` (or search with `find . -name asidz-agent-bridge.py` or use its absolute path on the current machine).
+
 ### Case A: Continuing an Existing Story / Project (e.g., "The Missing Shoe")
 Use this when characters already exist in a Google Flow project:
 
 ```bash
-python3 /Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py run \
-  --prompts-file "/Users/sid/Desktop/AsidzAutoFlow_Projects/<ProjectName>/prompts.txt" \
+python3 "$BRIDGE" run \
+  --prompts-file "<path_to>/prompts.txt" \
   --project-url "https://flow.google.com/project/<project-id>" \
   --project-name "<ProjectName>" \
-  --project-dir "/Users/sid/Desktop/AsidzAutoFlow_Projects/<ProjectName>" \
+  --project-dir "<project_dir>" \
   --mode textToVideo \
   --aspect-ratio 16:9 \
   --model "Omni 1.1 Flash" \
@@ -58,9 +86,9 @@ python3 /Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py run
 
 ### Case B: Running Directly via Prompt Arguments
 ```bash
-python3 /Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py run \
+python3 "$BRIDGE" run \
   --project-name "MyStory" \
-  --project-dir "/Users/sid/Desktop/AsidzAutoFlow_Projects/MyStory" \
+  --project-dir "<destination_dir>/MyStory" \
   --mode textToVideo \
   --aspect-ratio 16:9 \
   --model "Omni 1.1 Flash" \

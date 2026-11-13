@@ -1,10 +1,42 @@
 # AsidZ AutoFlow — AI Agent Bridge & B-Roll Automation Manual (`AGENT_BRIDGE.md`)
 
 **Official Platform:** [https://asidz.com](https://asidz.com)  
-**Repository Root:** `/Users/sid/Desktop/google-flow-autoflow`  
-**Bridge Script:** `/Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py`
+**Bridge Script:** `bridge/asidz-agent-bridge.py` (located in the `google-flow-autoflow` repository)
 
-This document provides complete instructions for **Claude Desktop**, **Antigravity**, **Cursor**, **Windsurf**, and any local AI coding agent to control the **AsidZ AutoFlow** Chrome extension on **Google Flow** (`https://flow.google.com`) to generate and download AI B-roll videos and images automatically.
+This document provides complete instructions for **Claude Desktop**, **Claude Code**, **Antigravity**, **Cursor**, **Windsurf**, and any local AI coding agent to control the **AsidZ AutoFlow** Chrome extension on **Google Flow** (`https://flow.google.com`) to generate and download AI B-roll videos and images automatically.
+
+---
+
+## 0. Zero-Config Setup & System Preflight (For Any New PC or Mac)
+
+Before running B-rolls or video batches, any AI coding agent can verify that the system is ready by running the built-in diagnostic doctor:
+
+```bash
+python3 bridge/asidz-agent-bridge.py doctor
+```
+
+### Essential Requirements (Only 2 things needed!):
+1. **Google Chrome** (v116+):
+   - Required for Google Flow and Chrome's native `sidePanel` and `debugger` (CDP) APIs.
+   - macOS: `/Applications/Google Chrome.app`
+   - Windows: Standard Chrome install (`Program Files\Google\Chrome\Application\chrome.exe`).
+2. **Python 3** (v3.8+):
+   - Pre-installed on macOS; standard install on Windows (`python.org`).
+   - **Zero pip packages required**: The bridge relies 100% on Python's built-in standard library (`http.server`, `urllib`, `subprocess`, `argparse`, `json`, `os`, `sys`). No `pip install` or virtual environment needed!
+3. **Google Account:**
+   - Logged in to [https://flow.google.com](https://flow.google.com) in Google Chrome.
+4. **AsidZ AutoFlow Extension (One-time 2-minute setup):**
+   - Open Chrome and navigate to `chrome://extensions`.
+   - Enable the **Developer mode** toggle in the top-right corner.
+   - Click **Load unpacked** (top-left).
+   - Select the `extension/` folder inside the `google-flow-autoflow` repository.
+   - Click the puzzle icon in Chrome's toolbar and pin **AsidZ AutoFlow** for quick access.
+
+### Dynamic Path Resolution for AI Coding Agents:
+Agents should locate `asidz-agent-bridge.py` dynamically relative to the current workspace or repository:
+- Inside the repository root: `python3 bridge/asidz-agent-bridge.py run ...`
+- Inside an adjacent project folder (e.g., `AsidzAutoFlow_Projects`): `python3 ../google-flow-autoflow/bridge/asidz-agent-bridge.py run ...`
+- Never rely on hardcoded username paths (e.g. `/Users/sid/...`) when sharing across machines.
 
 ---
 

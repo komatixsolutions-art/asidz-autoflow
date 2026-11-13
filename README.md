@@ -28,18 +28,25 @@ By combining Chrome DevTools Protocol (`chrome.debugger`) hardware-level keystro
 
 ## 🛠️ Step 1: Install the Chrome Extension
 
-1. Open Google Chrome on your Mac.
+1. Open Google Chrome on your Mac or PC.
 2. Navigate to:
    ```text
    chrome://extensions
    ```
 3. In the top-right corner, toggle **Developer mode** to **ON**.
 4. Click **Load unpacked** in the top-left corner.
-5. Select the extension directory:
-   ```text
-   /Users/sid/Desktop/google-flow-autoflow/extension
-   ```
-6. **AsidZ AutoFlow** will now appear in your active extensions list.
+5. Select the `extension/` directory inside this repository.
+6. **AsidZ AutoFlow** will now appear in your active extensions list. Click the puzzle icon in Chrome's toolbar and pin it.
+
+---
+
+## ⚡ Step 2: System Preflight (Doctor Check)
+
+Run the built-in diagnostic doctor to verify that Python, Chrome, and the extension bundle are ready:
+```bash
+python3 bridge/asidz-agent-bridge.py doctor
+```
+* **Zero External Dependencies**: The bridge runs 100% on the standard Python 3 library (`urllib`, `http.server`, etc.). No `pip install` or virtual environment required!
 
 ---
 
@@ -84,7 +91,7 @@ docker run -p 5050:5050 asidz-autoflow-saas
 - **Agent Operating Manual**: See [`AGENT_BRIDGE.md`](./AGENT_BRIDGE.md) and [`CLAUDE.md`](./CLAUDE.md).
 - **One-Command B-Roll Run**:
   ```bash
-  python3 /Users/sid/Desktop/google-flow-autoflow/bridge/asidz-agent-bridge.py run \
+  python3 bridge/asidz-agent-bridge.py run \
     --mode textToVideo \
     --aspect-ratio 9:16 \
     --model "Veo 3.1 - Lite" \
