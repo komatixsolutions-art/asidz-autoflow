@@ -9,6 +9,11 @@ var ASIDZ_DEFAULT_SELECTORS = {
   /* ---------- characters page / scan ---------- */
   charactersTabButton: "mat-list-item:has(mat-icon:contains('accessibility_new')), a[href*='/characters'], button:has(mat-icon:contains('accessibility_new')), [role='tab']:contains('Characters'), mat-list-item:contains('Characters')",
   charactersNameSelector: "flow-character-tile:has(img) span.character-tile-name, flow-character-tile .character-tile-name, flow-character-tile [class*='name'], [class*='character-tile'] [class*='name'], [class*='character-card'] [class*='name']",
+  createCharacterButton: "button:contains('New character'), button:contains('Create character'), button:has(mat-icon:contains('person_add')), button:has(mat-icon:contains('add')):has(span:contains('Character')), [role='button']:contains('Create character'), button[aria-label*='Create character' i]",
+  characterNameInput: "input[placeholder*='name' i], input[aria-label*='name' i], input[formcontrolname='name'], [role='dialog'] input[type='text']:first()",
+  characterUploadInput: "input[type='file'][accept*='image']",
+  characterSaveButton: "button:contains('Save'), button:contains('Create'), button:contains('Done'), [role='dialog'] button.mat-primary, [role='dialog'] button:last()",
+  tileCreateCharacterOption: "[role='menuitem']:contains('Character'), [role='menuitem']:contains('character'), flow-menu-item:contains('Character')",
 
   /* ---------- project ---------- */
   createProjectButton: "button:has(mat-icon:contains(\"add_2\")):first(), button:has(mat-icon:contains(\"add\")):first(), button:contains('New project'):first()",
@@ -78,7 +83,7 @@ var ASIDZ_DEFAULT_SELECTORS = {
   tileByIndexTemplate: "cdk-virtual-scroll-viewport div.virtual-item-container flow-grid-tile-container:eq({index})",
   tileEditLink: "a[href*=\"/edit/\"], a[href*=\"edit\"], button[aria-label*='Edit'], button:has(mat-icon:contains(\"edit\")), button:has(span:contains(\"edit\"))",
   tileAddToPromptButton: "button[aria-label*='Add to prompt'], button[aria-label*='add to prompt'], button[aria-label*='Use in prompt'], button[aria-label*='Reuse'], button:contains('Add to prompt'), button:has(mat-icon:contains(\"add_photo_alternate\"))",
-  moreOptionsButtonInHoverTile: "button:has(mat-icon:contains(\"more_vert\")), button:has(span:contains(\"more_vert\")), button[aria-label*='More']",
+  moreOptionsButtonInHoverTile: "button[aria-label*='More' i], button[aria-label*='Options' i], button:has(mat-icon:contains('more_vert')), button:has(mat-icon:contains('more_horiz'))",
   downloadButtonInHoverTile: "flow-menu-item mat-icon:contains(\"download\"), [role='menuitem']:has(mat-icon:contains(\"download\")), [role='menuitem']:contains('Download')",
   quality1080Option: "button:has(span:contains(\"1080p\")), [role='menuitem']:contains('1080p')",
   quality2KOption: "button:has(span:contains(\"2K\")), [role='menuitem']:contains('2K')",

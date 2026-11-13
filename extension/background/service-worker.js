@@ -153,6 +153,22 @@ async function setupPanel() {
 }
 setupPanel();
 
+if (chrome.commands?.onCommand) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command === 'open-side-panel' || command === '_execute_action') {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = tabs[0];
+        if (tab && tab.windowId) {
+          await chrome.sidePanel.open({ windowId: tab.windowId });
+        }
+      } catch (err) {
+        console.warn('[AutoFlow] Failed to open side panel on command:', err);
+      }
+    }
+  });
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   await setupPanel();
   if (details.reason === 'install') {
@@ -162,6 +178,20 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     } catch (_) {}
   }
 });
+
+/* ---------------- Anti-Throttling Keep-Alive Alarm ---------------- */
+try {
+  if (chrome.alarms) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === 'asidz_keepalive') {
+        if (activeAgentJobId) {
+          reportBridgeEvent({ type: 'ACTION_LOG', level: 'debug', message: 'Heartbeat keep-alive active' });
+        }
+      }
+    });
+    chrome.alarms.create('asidz_keepalive', { periodInMinutes: 0.5 });
+  }
+} catch (_) {}
 
 /* ---------------- Debugger (CDP 1.3 trusted inputs) ---------------- */
 const attached = new Set();
@@ -182,6 +212,10 @@ async function ensureAttached(tabId) {
   try {
     await chrome.debugger.sendCommand({ tabId }, 'Network.enable', {});
     await chrome.debugger.sendCommand({ tabId }, 'Network.setCacheDisabled', { cacheDisabled: true });
+    // Anti-throttling CDP Focus Emulation:
+    // Forces Chrome rendering engine to treat Google Flow tab as permanently focused and visible,
+    // preventing JavaScript timer throttling down to 1Hz or background pausing when minimized!
+    await chrome.debugger.sendCommand({ tabId }, 'Emulation.setFocusEmulationEnabled', { enabled: true });
   } catch (_) {}
 }
 
@@ -262,20 +296,61 @@ function resolveCharactersForPrompt(prompt, scannedChars, enableCharacterControl
   return found.length ? found : null;
 }
 
-async function findOrOpenFlowTab() {
+async function findOrOpenFlowTab(targetUrl) {
+  const urlToOpen =
+    targetUrl && typeof targetUrl === 'string' && (targetUrl.includes('flow.google.com') || targetUrl.includes('labs.google/fx'))
+      ? targetUrl
+      : FLOW_URL;
+
   let tabs = await chrome.tabs.query({ url: FLOW_PATTERNS });
+  let tab;
   if (tabs && tabs.length) {
-    return tabs.find((t) => t.active) || tabs[0];
+    tab = tabs.find((t) => t.active) || tabs[0];
+    if (targetUrl && tab.url !== targetUrl) {
+      try {
+        await chrome.tabs.update(tab.id, { url: targetUrl });
+        await new Promise((r) => setTimeout(r, 2000));
+      } catch (_) {}
+    }
+  } else {
+    tab = await chrome.tabs.create({ url: urlToOpen, active: true });
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+        if (res && res.ok) break;
+      } catch (_) {}
+    }
   }
-  const created = await chrome.tabs.create({ url: FLOW_URL, active: true });
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
+
+  // Active Browser Lifecycle & Side Panel Reveal:
+  // 1. Unminimize and focus the window
+  // 2. Activate the Flow tab
+  // 3. Open the AutoFlow Side Panel visibly (with docked popup fallback if user gesture is required)
+  if (tab && tab.id) {
     try {
-      const res = await chrome.tabs.sendMessage(created.id, { type: 'PING' });
-      if (res && res.ok) return created;
-    } catch (_) {}
+      await chrome.tabs.update(tab.id, { active: true });
+      if (tab.windowId) {
+        await chrome.windows.update(tab.windowId, { focused: true, state: 'normal' });
+      }
+
+      if (chrome.sidePanel && typeof chrome.sidePanel.open === 'function') {
+        try {
+          if (tab.windowId) {
+            await chrome.sidePanel.open({ windowId: tab.windowId });
+          } else {
+            await chrome.sidePanel.open({ tabId: tab.id });
+          }
+        } catch (_) {
+          // Native sidepanel requires user action or is already open
+        }
+      }
+    } catch (err) {
+      console.warn('[AutoFlow] Could not focus window/open sidePanel:', err);
+    }
   }
-  return created;
+
+  return tab;
 }
 
 async function sendTabMsg(tabId, msg) {
@@ -286,6 +361,200 @@ async function sendTabMsg(tabId, msg) {
       else resolve(res);
     });
   });
+}
+
+function parseSceneConfig(item, updatedSettings, scannedChars, total, i) {
+  let promptText = typeof item === 'string' ? item : (item && item.prompt ? item.prompt : '');
+  let overrides = typeof item === 'object' && item ? { ...item } : {};
+
+  // Extract inline bracket tags: [mode:textToImage], [duration:4s], [ratio:16:9], [model:Omni 1.1 Flash], [outputs:2]
+  const tagRe = /\[(mode|duration|len|length|ratio|aspect|aspectRatio|model|imageModel|outputs|quality):\s*([^\]]+)\]/gi;
+  let match;
+  while ((match = tagRe.exec(promptText)) !== null) {
+    const k = match[1].toLowerCase();
+    const v = match[2].trim();
+    if (k === 'mode') overrides.mode = v;
+    else if (k === 'duration' || k === 'len' || k === 'length') overrides.duration = v;
+    else if (k === 'ratio' || k === 'aspect' || k === 'aspectratio') overrides.aspectRatio = v;
+    else if (k === 'model') overrides.model = v;
+    else if (k === 'imagemodel') overrides.imageModel = v;
+    else if (k === 'outputs') overrides.outputCount = parseInt(v, 10) || 1;
+    else if (k === 'quality') overrides.quality = v;
+  }
+  const cleanPrompt = promptText.replace(tagRe, '').replace(/\s{2,}/g, ' ').trim();
+
+  // Mode
+  const effectiveMode = overrides.mode || (updatedSettings.mode === 'agentAutomation' ? updatedSettings.agentType : updatedSettings.mode) || 'textToVideo';
+  const isVideo = ['textToVideo', 'imageToVideo', 'componentsToVideo', 'agentAutomationToVideo'].includes(effectiveMode);
+
+  // Characters
+  const characters = resolveCharactersForPrompt(
+    cleanPrompt,
+    scannedChars,
+    updatedSettings.enableCharacterControl,
+    updatedSettings.defaultCharacters
+  );
+
+  // Model
+  let effectiveModel = overrides.model;
+  if (!effectiveModel) {
+    effectiveModel = isVideo ? updatedSettings.model : (overrides.imageModel || updatedSettings.imageModel);
+  }
+  if (isVideo && /\bveo\b/i.test(effectiveModel || '') && characters && characters.length >= 2) {
+    effectiveModel = 'Omni 1.1 Flash';
+  }
+
+  // Duration
+  let defOpt = isVideo ? updatedSettings.defaultVideoOption : updatedSettings.defaultImageOption;
+  let effectiveDuration = overrides.duration || overrides.videoOption || defOpt || '8s';
+  if (total > 0 && i === total - 1 && String(effectiveDuration).includes('-concat')) {
+    effectiveDuration = String(effectiveDuration).split('-concat')[0];
+  }
+  const isConcat = String(effectiveDuration).includes('concat');
+
+  // Aspect ratio
+  const effectiveRatio = overrides.aspectRatio || overrides.ratio || updatedSettings.aspectRatio || '16:9';
+
+  // Output count
+  const effectiveOutputs = isConcat ? 1 : Number(overrides.outputCount || overrides.outputs || updatedSettings.outputCount) || 1;
+
+  // Quality
+  const autoDownloadResourceQuality = overrides.quality || (isVideo ? updatedSettings.autoDownloadVideoQuality : updatedSettings.autoDownloadImageQuality);
+
+  return {
+    prompt: cleanPrompt,
+    mode: effectiveMode,
+    images: overrides.images || [],
+    speaker: updatedSettings.defaultSpeaker && updatedSettings.defaultSpeaker !== 'none' ? updatedSettings.defaultSpeaker : null,
+    characters,
+    aspectRatio: effectiveRatio,
+    outputCount: effectiveOutputs,
+    model: effectiveModel,
+    videoOption: isVideo ? effectiveDuration : undefined,
+    promptIndex: i + 1,
+    autoDownloadResourceQuality,
+    isConcat,
+    maxRetries: Number(overrides.maxRetries ?? updatedSettings.maxRetries ?? 1),
+    autoChangeFileName: updatedSettings.autoChangeFileName !== false,
+    fileNamingSystem: updatedSettings.fileNamingSystem || 'prompt_tag',
+    folderName: updatedSettings.folderName || 'asidz-flow',
+    projectUrl: updatedSettings.projectUrl || null,
+    projectName: updatedSettings.projectName || null
+  };
+}
+
+async function uploadFilesViaCdp(tabId, filePaths) {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    return { success: false, error: 'No files provided for upload' };
+  }
+  await ensureAttached(tabId);
+  try { await cdp(tabId, 'DOM.enable', {}); } catch (_) {}
+
+  // 1. Ensure media dialog is open
+  await cdp(tabId, 'Runtime.evaluate', {
+    expression: `(async () => {
+      let sideBtn = document.querySelector('.sidebar-upload-btn');
+      if (sideBtn) return 'ready';
+
+      const addProjBtn = Array.from(document.querySelectorAll('button')).find(b => {
+        const t = (b.innerText || '').toLowerCase();
+        return t.includes('add from project') || t.includes('upload');
+      });
+      if (addProjBtn) {
+        addProjBtn.click();
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 150));
+          if (document.querySelector('.sidebar-upload-btn')) return 'ready';
+        }
+      }
+
+      // If not on character edit view, open left panel Characters and click + New character
+      const charNavBtn = Array.from(document.querySelectorAll('button, a')).find(b => (b.innerText || '').includes('Characters'));
+      if (charNavBtn) charNavBtn.click();
+      await new Promise(r => setTimeout(r, 1000));
+
+      const newCharTile = Array.from(document.querySelectorAll('button, flow-tile-container')).find(b => {
+        return (b.innerText || '').toLowerCase().includes('new character');
+      });
+      if (newCharTile) {
+        newCharTile.click();
+        await new Promise(r => setTimeout(r, 1500));
+        const btn = Array.from(document.querySelectorAll('button')).find(b => {
+          const t = (b.innerText || '').toLowerCase();
+          return t.includes('add from project') || t.includes('upload');
+        });
+        if (btn) {
+          btn.click();
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 150));
+            if (document.querySelector('.sidebar-upload-btn')) return 'ready';
+          }
+        }
+      }
+
+      return 'could not open media picker dialog';
+    })()`,
+    awaitPromise: true
+  });
+
+  // 2. Click .sidebar-upload-btn and capture the dynamic file input created by Google Flow
+  const captureRes = await cdp(tabId, 'Runtime.evaluate', {
+    expression: `(() => {
+      let capturedInput = null;
+      const orig = document.createElement;
+      document.createElement = function(tag) {
+        const el = orig.apply(this, arguments);
+        if (tag && tag.toLowerCase() === 'input') {
+          el.setAttribute('data-asidz-upload-input', 'true');
+          capturedInput = el;
+        }
+        return el;
+      };
+
+      const sideBtn = document.querySelector('.sidebar-upload-btn');
+      if (sideBtn) sideBtn.click();
+      document.createElement = orig;
+
+      return capturedInput;
+    })()`
+  });
+
+  if (!captureRes || !captureRes.result || !captureRes.result.objectId) {
+    throw new Error('Could not capture Flow file input element');
+  }
+
+  // 3. Set real native OS files on the input via Chrome CDP
+  await cdp(tabId, 'DOM.setFileInputFiles', {
+    objectId: captureRes.result.objectId,
+    files: filePaths
+  });
+
+  // 4. Dispatch change event to trigger Flow's native upload RPC
+  await cdp(tabId, 'Runtime.evaluate', {
+    expression: `(() => {
+      const inp = document.querySelector('input[data-asidz-upload-input="true"]') || document.querySelector('input[type="file"]');
+      if (inp) {
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+        return 'dispatched change with ' + (inp.files ? inp.files.length : 0) + ' files';
+      }
+      return 'input not found for dispatch';
+    })()`
+  });
+
+  // 5. Allow Google Flow time to process and commit native upload RPC
+  await new Promise((r) => setTimeout(r, 8000));
+
+  // 6. Close the media picker dialog
+  await cdp(tabId, 'Runtime.evaluate', {
+    expression: `(() => {
+      const closeBtn = document.querySelector('flow-media-picker-dialog button[aria-label*="close" i], button.close-button');
+      if (closeBtn) closeBtn.click();
+      else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+    })()`
+  });
+  await new Promise((r) => setTimeout(r, 1000));
+
+  return { success: true, count: filePaths.length };
 }
 
 async function executeAgentJob(job) {
@@ -302,8 +571,92 @@ async function executeAgentJob(job) {
       ? st[CHARS_KEY] || st.autoflowCharacters
       : [];
 
+    if (job.action === 'upload_files') {
+      const targetProjectUrl = (job.settings && job.settings.projectUrl) || null;
+      const tab = await findOrOpenFlowTab(targetProjectUrl);
+      if (!tab || !tab.id) throw new Error('Flow tab not available for file upload');
+      let uploadErr = null;
+      let uploadRes = null;
+      try {
+        uploadRes = await uploadFilesViaCdp(tab.id, job.files || []);
+      } catch (err) {
+        uploadErr = String(err && err.message ? err.message : err);
+      }
+      reportBridgeEvent({
+        type: 'FILES_UPLOADED',
+        success: !!(uploadRes && uploadRes.success),
+        count: uploadRes ? uploadRes.count : 0,
+        error: uploadErr
+      });
+      return;
+    }
+
+    if (job.action === 'eval') {
+      const tab = await findOrOpenFlowTab(job.targetUrl || null);
+      if (!tab || !tab.id) throw new Error('No Flow tab available for eval');
+      await ensureAttached(tab.id);
+      const evalRes = await cdp(tab.id, 'Runtime.evaluate', {
+        expression: job.expression,
+        returnByValue: true,
+        awaitPromise: true
+      });
+      reportBridgeEvent({
+        type: 'EVAL_RESULT',
+        evalResult: evalRes && evalRes.result ? evalRes.result.value : null,
+        evalError: evalRes && evalRes.exceptionDetails ? JSON.stringify(evalRes.exceptionDetails) : null
+      });
+      return;
+    }
+
+    if (job.action === 'register_characters') {
+      const targetProjectUrl = (job.settings && job.settings.projectUrl) || null;
+      const tab = await findOrOpenFlowTab(targetProjectUrl);
+      if (!tab || !tab.id) throw new Error('Flow tab not available for character registration');
+
+      // 1. Gather all local file paths from characters payload
+      const allPaths = [];
+      for (const c of (job.characters || [])) {
+        for (const img of (c.images || [])) {
+          if (img.path && !allPaths.includes(img.path)) {
+            allPaths.push(img.path);
+          }
+        }
+      }
+
+      // 2. Upload character sheets natively via CDP if provided
+      if (allPaths.length > 0) {
+        try {
+          await uploadFilesViaCdp(tab.id, allPaths);
+        } catch (upErr) {
+          console.warn('[AutoFlow] Native upload warning:', upErr);
+        }
+      }
+
+      const res = await sendTabMsg(tab.id, {
+        type: 'REGISTER_CHARACTERS',
+        projectName: job.projectName || null,
+        characters: job.characters || []
+      });
+      if (res && res.scannedCharacters) {
+        await chrome.storage.local.set({
+          [CHARS_KEY]: res.scannedCharacters,
+          autoflowCharacters: res.scannedCharacters
+        });
+      }
+      reportBridgeEvent({
+        type: 'CHARACTERS_REGISTERED',
+        success: !!(res && res.success),
+        results: (res && res.results) || [],
+        scannedCharacters: (res && res.scannedCharacters) || [],
+        missing: (res && res.missing) || [],
+        error: (res && res.error) || null
+      });
+      return;
+    }
+
     if (job.action === 'stop') {
-      const tab = await findOrOpenFlowTab();
+      const targetProjectUrl = updatedSettings.projectUrl || incomingSettings.projectUrl || null;
+    const tab = await findOrOpenFlowTab(targetProjectUrl);
       if (tab && tab.id && (job.groupId || activeAgentGroupId)) {
         await sendTabMsg(tab.id, {
           type: 'CANCEL_PROMPT_GROUP',
@@ -322,53 +675,38 @@ async function executeAgentJob(job) {
       'model', 'imageModel', 'defaultVideoOption', 'defaultImageOption',
       'maxRetries', 'autoDownloadVideoQuality', 'autoDownloadImageQuality',
       'enableCharacterControl', 'defaultSpeaker', 'autoChangeFileName',
-      'fileNamingSystem', 'folderName', 'zoomOutWhileRunning'
+      'fileNamingSystem', 'folderName', 'zoomOutWhileRunning', 'projectUrl', 'projectName'
     ];
     for (const k of allowedKeys) {
       if (incomingSettings[k] !== undefined && incomingSettings[k] !== null) {
         updatedSettings[k] = incomingSettings[k];
       }
     }
+    if (job.projectName && !updatedSettings.projectName) {
+      updatedSettings.projectName = job.projectName;
+    }
 
-    let promptList = [];
-    if (Array.isArray(job.prompts)) {
-      promptList = job.prompts.map((p) => String(p || '').trim()).filter(Boolean);
+    let rawScenes = [];
+    if (Array.isArray(job.scenes) && job.scenes.length) {
+      rawScenes = job.scenes;
+    } else if (Array.isArray(job.prompts)) {
+      rawScenes = job.prompts.map((p) => String(p || '').trim()).filter(Boolean);
     } else if (typeof job.promptsText === 'string' || typeof job.prompts === 'string') {
       const raw = String(job.promptsText || job.prompts || '');
-      promptList = raw.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+      rawScenes = raw.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
     }
 
-    const isVideo =
-      updatedSettings.mode === 'agentAutomation'
-        ? updatedSettings.agentType === 'agentAutomationToVideo'
-        : ['textToVideo', 'imageToVideo', 'componentsToVideo'].includes(updatedSettings.mode);
+    const total = rawScenes.length;
+    const payloads = rawScenes.map((item, i) =>
+      parseSceneConfig(item, updatedSettings, scannedChars, total, i)
+    );
 
-    if (isVideo && /\bveo\b/i.test(updatedSettings.model || '') && !incomingSettings.forceVeo) {
-      const multiChar = promptList.some((p) => {
-        const ch = resolveCharactersForPrompt(
-          p,
-          scannedChars,
-          updatedSettings.enableCharacterControl,
-          updatedSettings.defaultCharacters
-        );
-        return (ch && ch.length >= 2) || updatedSettings.mode === 'componentsToVideo';
-      });
-      if (multiChar) {
-        updatedSettings.model = 'Omni 1.1 Flash';
-        reportBridgeEvent({
-          type: 'ACTION_LOG',
-          level: 'warn',
-          message: 'Auto-switched model from Veo to "Omni 1.1 Flash" because multi-character/ingredient scenes exceed Veo 3.1 limits.'
-        });
-      }
-    }
-
-    const formattedPromptsText = promptList.join('\n\n');
+    const formattedPromptsText = payloads.map((p) => p.prompt).join('\n\n');
     const toStore = {
       [SETTINGS_KEY]: updatedSettings,
       aws_settings: updatedSettings
     };
-    if (promptList.length > 0) {
+    if (payloads.length > 0) {
       toStore[FORM_KEY] = { prompts: formattedPromptsText };
       toStore.aws_form = { prompts: formattedPromptsText };
     }
@@ -378,7 +716,7 @@ async function executeAgentJob(job) {
       type: 'AGENT_BRIDGE_SYNC',
       data: {
         settings: updatedSettings,
-        promptsText: promptList.length > 0 ? formattedPromptsText : undefined,
+        promptsText: payloads.length > 0 ? formattedPromptsText : undefined,
         autoStart: job.autoStart !== false
       }
     }).catch(() => {});
@@ -386,17 +724,18 @@ async function executeAgentJob(job) {
     reportBridgeEvent({
       type: 'JOB_CONFIGURED',
       status: job.autoStart === false ? 'populated' : 'starting',
-      promptCount: promptList.length,
+      promptCount: payloads.length,
       settings: updatedSettings
     });
 
-    if (job.autoStart === false || !promptList.length) {
-      return;
-    }
-
-    const tab = await findOrOpenFlowTab();
+    const targetProjectUrl = updatedSettings.projectUrl || incomingSettings.projectUrl || null;
+    const tab = await findOrOpenFlowTab(targetProjectUrl);
     if (!tab || !tab.id) {
       throw new Error('Could not find or open Google Flow tab');
+    }
+
+    if (job.autoStart === false || !payloads.length) {
+      return;
     }
 
     try {
@@ -412,48 +751,9 @@ async function executeAgentJob(job) {
       }
     }
 
-    const total = promptList.length;
-    const defOpt = isVideo ? updatedSettings.defaultVideoOption : updatedSettings.defaultImageOption;
-    const promptOption = (i) => {
-      if (total > 0 && i === total - 1 && String(defOpt).includes('-concat')) {
-        return String(defOpt).split('-concat')[0];
-      }
-      return defOpt;
-    };
-    const isConcat = (i) => String(promptOption(i)).includes('concat');
-    const anyConcat = promptList.some((_, i) => isConcat(i));
-    const mode = updatedSettings.mode === 'agentAutomation' ? updatedSettings.agentType : updatedSettings.mode;
-    const outputCount = anyConcat
-      ? 1
-      : Number(updatedSettings.mode === 'agentAutomation' ? updatedSettings.agentOutputCount : updatedSettings.outputCount) || 1;
+    const anyConcat = payloads.some((p) => p.isConcat);
     const concurrent =
       anyConcat || updatedSettings.mode === 'agentAutomation' ? 1 : Number(updatedSettings.concurrentPrompts) || 1;
-
-    const payloads = promptList.map((p, i) => ({
-      prompt: p,
-      mode,
-      images: [],
-      speaker: updatedSettings.defaultSpeaker && updatedSettings.defaultSpeaker !== 'none' ? updatedSettings.defaultSpeaker : null,
-      characters: resolveCharactersForPrompt(
-        p,
-        scannedChars,
-        updatedSettings.enableCharacterControl,
-        updatedSettings.defaultCharacters
-      ),
-      aspectRatio: updatedSettings.aspectRatio || '16:9',
-      outputCount,
-      model: isVideo ? updatedSettings.model : updatedSettings.imageModel,
-      videoOption: isVideo ? promptOption(i) : undefined,
-      promptIndex: i + 1,
-      autoDownloadResourceQuality: isVideo
-        ? updatedSettings.autoDownloadVideoQuality
-        : updatedSettings.autoDownloadImageQuality,
-      isConcat: isConcat(i),
-      maxRetries: Number(updatedSettings.maxRetries ?? 1),
-      autoChangeFileName: updatedSettings.autoChangeFileName !== false,
-      fileNamingSystem: updatedSettings.fileNamingSystem || 'prompt_tag',
-      folderName: updatedSettings.folderName || 'asidz-flow'
-    }));
 
     const groupId = `agent-group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     activeAgentGroupId = groupId;
@@ -512,6 +812,21 @@ async function pollAgentBridge() {
 
 setInterval(pollAgentBridge, 2000);
 
+// Auto-wake listeners: Whenever Chrome is focused, tab changed, or alarm triggers, poll bridge immediately
+try {
+  chrome.tabs.onActivated.addListener(() => { pollAgentBridge(); });
+  chrome.windows.onFocusChanged.addListener((winId) => {
+    if (winId !== chrome.windows.WINDOW_ID_NONE) pollAgentBridge();
+  });
+  if (chrome.alarms) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === 'asidz_keepalive') {
+        pollAgentBridge();
+      }
+    });
+  }
+} catch (_) {}
+
 /* ---------------- Message Dispatcher ---------------- */
 const errText = (e) => (e && e.message ? e.message : String(e));
 
@@ -526,6 +841,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   };
 
   switch (msg && msg.type) {
+    case 'POLL_BRIDGE_NOW':
+      pollAgentBridge();
+      reply({ success: true });
+      return true;
     case 'SET_ZOOM':
       if (!needTab()) return false;
       chrome.tabs.setZoom(tabId, msg.zoomFactor)

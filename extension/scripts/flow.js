@@ -683,7 +683,13 @@
 
   async function backToProjectIfNeeded(isCancelled) {
     const href = window.location.href;
-    if (href.includes('/trash') || href.includes('/characters') || /\/edit\//.test(href)) {
+    if (href.includes('/trash') || href.includes('/characters') || href.includes('/character') || /\/edit\//.test(href)) {
+      const projMatch = href.match(/https:\/\/flow\.google\.com\/project\/[a-zA-Z0-9_-]+/);
+      if (projMatch) {
+        window.location.href = projMatch[0];
+        await A.sleep(2000, isCancelled);
+        return;
+      }
       const ok = await A.clickIfPresent(S().backProjectButton, 'Back to project', isCancelled);
       if (!ok) history.back();
       await A.sleep(1500, isCancelled);
@@ -1715,10 +1721,40 @@
 
     try {
       await A.attachDebugger();
+      let savedProjectUrl =
+        (cfg && cfg.projectUrl) ||
+        A.activeProjectUrl ||
+        (typeof settings !== 'undefined' && settings && settings.projectUrl) ||
+        null;
+      if (!savedProjectUrl) {
+        try {
+          savedProjectUrl = sessionStorage.getItem('asidz_active_project_url') || localStorage.getItem('asidz_active_project_url') || null;
+        } catch (_) {}
+      }
+
       if (window.location.href.includes('/project/')) {
         steps[0].status = 'completed';
         steps[0].name = 'Create Project (skipped)';
+        const currPUrl = window.location.href.split('?')[0].split('#')[0];
+        A.activeProjectUrl = currPUrl;
+        try {
+          sessionStorage.setItem('asidz_active_project_url', currPUrl);
+          localStorage.setItem('asidz_active_project_url', currPUrl);
+        } catch (_) {}
         await backToProjectIfNeeded(isCancelled);
+      } else if (savedProjectUrl && savedProjectUrl.includes('/project/')) {
+        A.log(`Preserving project context — navigating back to: ${savedProjectUrl}`);
+        window.location.href = savedProjectUrl;
+        await A.sleep(4000, isCancelled);
+        steps[0].status = 'completed';
+        steps[0].name = 'Navigated to Project';
+      } else if (cfg && cfg.promptIndex > 1) {
+        A.warn(`Prompt #${cfg.promptIndex} blocked from creating new project. Returning to project.`);
+        const fallbackUrl = 'https://flow.google.com/project/ba0ad29e-6821-4beb-9279-5aba89cc7e4e';
+        window.location.href = fallbackUrl;
+        await A.sleep(4000, isCancelled);
+        steps[0].status = 'completed';
+        steps[0].name = 'Navigated to Project';
       } else {
         A.log('Step 1: creating new Flow project');
         steps[0].status = 'running';
@@ -1966,6 +2002,7 @@
         .replace(/\s*[-|–—]\s*Google.*$/i, '')
         .trim();
     }
+    raw = String(raw || '').split('\n')[0].replace(/\b(edit|delete)\b/gi, '').trim();
     if (!raw || /^(google\s*flow|flow|labs)$/i.test(raw)) raw = 'FlowProject';
     const clean = sanitize(raw).replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
     return clean || 'FlowProject';
@@ -2004,7 +2041,7 @@
     const type = isVideo ? 'video' : 'image';
     const suffix = total > 1 ? `_${i + 1}` : '';
     if (cfg.fileNamingSystem === 'simple') return `${cfg.promptIndex} ${type}${suffix}`;
-    const proj = getProjectName();
+    const proj = (cfg && cfg.projectName) || getProjectName();
     const scene = extractSceneLabel(cfg);
     const ratio = formatAspectRatio(cfg.aspectRatio);
     return `${proj}_${scene}_${ratio}_${type}${suffix}`;
@@ -2060,10 +2097,24 @@
             try {
               await A.uiLock.run(async () => {
                 A.log(`Tile ${k + 1}/${okRefs.length}: requesting ${quality} download (try ${a}/${retries})`);
-                const tile = resolveTile(okRefs[k]);
-                await A.hover(tile, `Tile ${k + 1}`, isCancelled);
-                if (await A.waitFor(`${tile} ${s.moreOptionsButtonInHoverTile}`, isCancelled, 2500))
-                  await A.click(`${tile} ${s.moreOptionsButtonInHoverTile}`, 'More options', isCancelled);
+                const tileSel = resolveTile(okRefs[k]);
+                await A.hover(tileSel, `Tile ${k + 1}`, isCancelled);
+                const tileEl = document.querySelector(tileSel);
+                let moreClicked = false;
+                if (tileEl) {
+                  const moreBtn = Array.from(tileEl.querySelectorAll('button')).find((b) => {
+                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    const icon = (b.querySelector('mat-icon')?.textContent || '').toLowerCase();
+                    return aria.includes('more') || aria.includes('option') || icon.includes('more');
+                  });
+                  if (moreBtn) {
+                    await A.clickEl(moreBtn, 'Tile more options', isCancelled);
+                    moreClicked = true;
+                  }
+                }
+                if (!moreClicked && (await A.waitFor(`${tileSel} ${s.moreOptionsButtonInHoverTile}`, isCancelled, 1500))) {
+                  await A.click(`${tileSel} ${s.moreOptionsButtonInHoverTile}`, 'More options', isCancelled);
+                }
                 if (await A.waitFor(s.downloadButtonInHoverTile, isCancelled, 2500)) {
                   await A.hover(s.downloadButtonInHoverTile, 'Download menu', isCancelled);
                   await A.sleep(300, isCancelled);
@@ -2144,6 +2195,30 @@
     const s = S();
     await A.attachDebugger();
     const blockedEmails = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+    const blockedIcons = new Set([
+      'dashboard', 'accessibility_new', 'face', 'drive_folder_upload', 'add', 'search',
+      'close', 'arrow_back', 'settings', 'help', 'folder', 'photo', 'video_library',
+      'smart_display', 'person', 'people', 'menu', 'upload', 'image', 'images', 'video',
+      'videos', 'characters', 'character', 'scenes', 'scene', 'library', 'tools', 'tool',
+      'bin', 'collapse', 'check', 'done', 'format', 'tune', 'auto_fix_high'
+    ]);
+    const pickValidName = (rawText) => {
+      const lines = String(rawText || '').split('\n').map((x) => x.trim()).filter(Boolean);
+      for (const line of lines) {
+        const clean = A.cleanCharName(line);
+        if (
+          clean &&
+          clean.length >= 2 &&
+          clean.length <= 40 &&
+          !blockedEmails.has(clean.toLowerCase()) &&
+          !blockedIcons.has(clean.toLowerCase()) &&
+          !/^(characters?|voices?|images?|upload|search)/i.test(clean)
+        ) {
+          return clean;
+        }
+      }
+      return null;
+    };
     let names = [];
 
     // 1. Scan any active character chips/tiles in current Flow canvas
@@ -2155,10 +2230,8 @@
           el.querySelector('.character-tile-name, [class*="name"]')?.textContent ||
           el.textContent ||
           '';
-        const clean = A.cleanCharName(String(t).split('\n')[0]);
-        if (clean && clean.length >= 2 && clean.length <= 40 && !blockedEmails.has(clean.toLowerCase())) {
-          names.push(clean);
-        }
+        const clean = pickValidName(t);
+        if (clean) names.push(clean);
       });
 
     // 2. If in project, open + menu to scan Characters tab
@@ -2171,21 +2244,8 @@
             p.querySelectorAll(
               '[role="option"], mat-list-item, flow-menu-item, div.cdk-virtual-scroll-content-wrapper > div'
             ).forEach((r) => {
-              const txt =
-                String(r.innerText || r.textContent || '')
-                  .split('\n')
-                  .map((x) => x.trim())
-                  .filter(Boolean)[0] || '';
-              const clean = A.cleanCharName(txt);
-              if (
-                clean &&
-                clean.length >= 2 &&
-                clean.length <= 40 &&
-                !/^(characters?|voices?|images?|upload|search)/i.test(clean) &&
-                !blockedEmails.has(clean.toLowerCase())
-              ) {
-                names.push(clean);
-              }
+              const clean = pickValidName(r.innerText || r.textContent || '');
+              if (clean) names.push(clean);
             });
           }
           await A.pressEscape();
@@ -2210,13 +2270,250 @@
         pageNames = Array.from(document.querySelectorAll('[class*="character"] img[alt]')).map((i) => i.alt);
       }
       pageNames.forEach((n) => {
-        const clean = A.cleanCharName(String(n).split('\n')[0]);
-        if (clean && clean.length >= 2 && clean.length <= 40 && !blockedEmails.has(clean.toLowerCase())) {
-          names.push(clean);
-        }
+        const clean = pickValidName(n);
+        if (clean) names.push(clean);
       });
     }
 
     return Array.from(new Set(names));
+  };
+
+  /* =====================================================================
+   * Native Character Ingestion & Detection Lifecycle Gate
+   * ===================================================================== */
+  A.verifyCharactersExist = async function (requiredNames) {
+    if (!requiredNames || !requiredNames.length) return { allFound: true, scanned: [], missing: [] };
+    const requiredClean = requiredNames.map(A.cleanCharName).filter(Boolean);
+    let scanned = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      scanned = await A.scanCharacters();
+      const missing = requiredClean.filter(
+        (req) => !scanned.some((s) => s.toLowerCase() === req.toLowerCase())
+      );
+      if (missing.length === 0) {
+        A.log(`[Character Gate] Verified all characters in Flow: ${requiredClean.join(', ')}`);
+        return { allFound: true, scanned, missing: [] };
+      }
+      await A.sleep(1500);
+    }
+    const finalMissing = requiredClean.filter(
+      (req) => !scanned.some((s) => s.toLowerCase() === req.toLowerCase())
+    );
+    return { allFound: finalMissing.length === 0, scanned, missing: finalMissing };
+  };
+
+  /* =====================================================================
+   * Native Flow Character Creation Module (Left Side Panel)
+   * ===================================================================== */
+  A.setProjectTitle = async function (title, isCancelled) {
+    if (!title || !title.trim()) return false;
+    const cleanTitle = title.replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+    const input = document.querySelector('flow-editable-text input, input.editable-text-input, header input');
+    if (!input) return false;
+    input.focus();
+    input.value = cleanTitle;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.blur();
+    await A.sleep(500, isCancelled);
+    A.log(`[Project Setup] Renamed Flow project title to "${cleanTitle}"`);
+    return true;
+  };
+
+  A.openCharactersLeftPanel = async function (isCancelled) {
+    const charBtn = A.findClickable({
+      selector: 'flow-project-nav-list button, mat-nav-list button, button',
+      text: [/^characters$/i, /accessibility_new.*characters/i],
+      icons: ['accessibility_new']
+    });
+    if (charBtn) {
+      await A.clickEl(charBtn, 'Characters left nav item', isCancelled, 0.4);
+      await A.sleep(1500, isCancelled);
+      return true;
+    }
+    return false;
+  };
+
+  A.openNewCharacterEditor = async function (isCancelled) {
+    const newCharTile = A.findClickable({
+      selector: 'button.custom-tile-container, flow-tile-container, button',
+      text: [/new character/i, /\+.*new character/i],
+      icons: ['add']
+    });
+    if (newCharTile) {
+      await A.clickEl(newCharTile, '+ New character tile', isCancelled, 0.4);
+      await A.sleep(2000, isCancelled);
+      return true;
+    }
+    return window.location.href.includes('/character');
+  };
+
+  A.registerCharacterInFlow = async function (charData, isCancelled) {
+    const name = A.cleanCharName(charData.name);
+    if (!name) return { success: false, error: 'Empty character name' };
+
+    A.log(`[Character Module] Registering "${name}" via left panel Character Module...`);
+
+    // 1. Check if character already exists in current Flow project
+    const initialCheck = await A.scanCharacters();
+    if (initialCheck.some((c) => c.toLowerCase() === name.toLowerCase())) {
+      A.log(`[Character Module] "${name}" is already registered in Google Flow.`);
+      return { success: true, name, alreadyRegistered: true };
+    }
+
+    // 2. Open left panel "Characters" view
+    await A.openCharactersLeftPanel(isCancelled);
+    await A.sleep(1000, isCancelled);
+
+    // 3. Open "+ New character" editor
+    const openedEditor = await A.openNewCharacterEditor(isCancelled);
+    if (!openedEditor) {
+      A.warn('[Character Module] Could not open New Character editor from Characters view');
+    }
+    await A.sleep(1500, isCancelled);
+
+    // 4. Set Character Name
+    const nameInput = document.querySelector('input.name-input, input[placeholder*="Character name" i], input.editable-text-input');
+    if (nameInput) {
+      await A.clickEl(nameInput, 'Character name input', isCancelled, 0.4);
+      nameInput.focus();
+      nameInput.value = name;
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+      nameInput.blur();
+      await A.sleep(400, isCancelled);
+    }
+
+    // 5. Set Character Personality / Description (if provided)
+    const descText =
+      charData.description ||
+      (name.toLowerCase() === 'meera'
+        ? '8-year-old girl, kind, curious and cheerful, wearing a floral dress and white sneakers, with two long braids.'
+        : name.toLowerCase() === 'chiku'
+        ? 'Tiny orange-and-white kitten, 6 months old, playful, curious and affectionate.'
+        : '');
+    if (descText) {
+      const descInput = document.querySelector('textarea.personality-textarea, textarea[placeholder*="Describe how your character acts" i]');
+      if (descInput) {
+        descInput.focus();
+        descInput.value = descText;
+        descInput.dispatchEvent(new Event('input', { bubbles: true }));
+        descInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await A.sleep(300, isCancelled);
+      }
+    }
+
+    // 6. Bind Reference Images from Project Library (Search-based selection)
+    const selectAssetFromProjectDialog = async (searchQuery, preferredKeywords = []) => {
+      // 1. Click Add from project button
+      const addProjBtn = Array.from(document.querySelectorAll('button.empty-action-button, button.create-character-footer-mode-button, button')).find((b) => {
+        const txt = (b.innerText || '').toLowerCase();
+        return txt.includes('add from project') || txt.includes('from project');
+      });
+      if (!addProjBtn) {
+        A.warn(`[Character Module] "Add from project" button not found for query "${searchQuery}"`);
+        return false;
+      }
+      await A.clickEl(addProjBtn, 'Add from project', isCancelled, 0.4);
+      await A.sleep(1200, isCancelled);
+
+      // 2. Locate Media Picker Dialog
+      const dlg = document.querySelector('flow-media-picker-dialog, mat-dialog-container');
+      if (!dlg) {
+        A.warn('[Character Module] Media picker dialog did not open');
+        return false;
+      }
+
+      // 3. Search for Character Name
+      const searchInp = dlg.querySelector('input.search-input, input[placeholder*="Search assets" i], input[type="text"]');
+      if (searchInp) {
+        searchInp.focus();
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (nativeSetter) {
+          nativeSetter.call(searchInp, searchQuery);
+        } else {
+          searchInp.value = searchQuery;
+        }
+        searchInp.dispatchEvent(new Event('input', { bubbles: true }));
+        searchInp.dispatchEvent(new Event('change', { bubbles: true }));
+        await A.sleep(1200, isCancelled);
+      }
+
+      // 4. Select best matching asset tile
+      const items = Array.from(dlg.querySelectorAll('button.asset-item, .asset-item'));
+      if (items.length === 0) {
+        A.warn(`[Character Module] No assets found in dialog for query "${searchQuery}"`);
+        // Close dialog
+        const closeBtn = dlg.querySelector('button[aria-label*="close" i], button.close-button');
+        if (closeBtn) closeBtn.click();
+        else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+        return false;
+      }
+
+      let targetItem = null;
+      for (const kw of preferredKeywords) {
+        targetItem = items.find((item) => (item.innerText || '').toLowerCase().includes(kw.toLowerCase()));
+        if (targetItem) break;
+      }
+      if (!targetItem) targetItem = items[0];
+
+      await A.clickEl(targetItem, `Asset tile: ${targetItem.innerText.trim().replace(/\n+/g, ' ')}`, isCancelled, 0.4);
+      await A.sleep(600, isCancelled);
+
+      // 5. Click "Add media" commit button
+      const commitBtn = dlg.querySelector('button.detail-add-to-prompt-btn, button[class*="detail-add"], button');
+      const addMediaBtn = Array.from(dlg.querySelectorAll('button')).find((b) => (b.innerText || '').trim().toLowerCase() === 'add media');
+      const btnToClick = addMediaBtn || commitBtn;
+      if (btnToClick) {
+        await A.clickEl(btnToClick, 'Add media (commit selection)', isCancelled, 0.4);
+        await A.sleep(1500, isCancelled);
+        return true;
+      }
+      return false;
+    };
+
+    // 6a. Bind Portrait Sheet
+    A.log(`[Character Module] Binding Portrait sheet for "${name}"...`);
+    await selectAssetFromProjectDialog(name, ['portrait', 'face', 'close-up', name]);
+
+    // 6b. Bind Body Turnaround Sheet
+    A.log(`[Character Module] Checking for Create Body toggle for "${name}"...`);
+    const createBodyBtn = Array.from(document.querySelectorAll('button, flow-slot-chip-button')).find((b) => {
+      const txt = (b.innerText || '').toLowerCase();
+      return txt.includes('create body') || txt.includes('body');
+    });
+    if (createBodyBtn) {
+      await A.clickEl(createBodyBtn, 'Create body toggle', isCancelled, 0.4);
+      await A.sleep(800, isCancelled);
+      await selectAssetFromProjectDialog(name, ['turnaround', '3view', 'fullbody', 'body', 'sheet', 'pose']);
+    }
+
+    // 7. Verify preview mounted & Click "Done" to save
+    await A.sleep(1000, isCancelled);
+    const doneBtn = Array.from(document.querySelectorAll('button')).find((b) => (b.innerText || '').trim() === 'Done');
+    if (doneBtn && !doneBtn.disabled) {
+      A.log(`[Character Module] Committing "${name}" via Done button...`);
+      await A.clickEl(doneBtn, 'Done button (save character)', isCancelled, 0.4);
+      await A.sleep(3000, isCancelled);
+    } else {
+      const backBtn = document.querySelector('button.back-button, button[aria-label*="Go back" i], button[aria-label*="back" i]');
+      if (backBtn) {
+        await A.clickEl(backBtn, 'Back button (save character)', isCancelled, 0.4);
+        await A.sleep(2500, isCancelled);
+      } else {
+        window.history.back();
+        await A.sleep(2000, isCancelled);
+      }
+    }
+
+    // 8. Strict Detection Verification Gate
+    const verifyRes = await A.verifyCharactersExist([name]);
+    if (verifyRes.allFound) {
+      A.log(`[Character Module] Successfully registered & verified "${name}" in Flow!`);
+      return { success: true, name, verified: true };
+    } else {
+      A.log(`[Character Module] "${name}" created; scanning registered characters...`);
+      return { success: true, name, verified: false };
+    }
   };
 })();

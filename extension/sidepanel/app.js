@@ -11,6 +11,13 @@
  */
 'use strict';
 
+if (window.location.search.includes('reload_once=1')) {
+  window.history.replaceState({}, '', 'index.html');
+  if (chrome.runtime && typeof chrome.runtime.reload === 'function') {
+    chrome.runtime.reload();
+  }
+}
+
 const FLOW_URL = 'https://flow.google.com/';
 const SETTINGS_KEY = 'asidz_settings';
 const FORM_KEY = 'asidz_form';
@@ -165,7 +172,14 @@ async function loadAll() {
   mergeModels();
 
   const rawChars = st[CHARS_KEY] || st.aws_scanned_characters || st.autoflowCharacters || [];
-  const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+  const blocked = new Set([
+    'gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud',
+    'dashboard', 'accessibility_new', 'face', 'drive_folder_upload', 'add', 'search',
+    'close', 'arrow_back', 'settings', 'help', 'folder', 'photo', 'video_library',
+    'smart_display', 'person', 'people', 'menu', 'upload', 'image', 'images', 'video',
+    'videos', 'characters', 'character', 'scenes', 'scene', 'library', 'tools', 'tool',
+    'bin', 'collapse', 'check', 'done', 'format', 'tune', 'auto_fix_high'
+  ]);
   scannedChars = (Array.isArray(rawChars) ? rawChars : [])
     .map((c) => String(c).replace(/^@+/, '').trim())
     .filter((c) => c && c.length >= 2 && !blocked.has(c.toLowerCase()));
@@ -978,7 +992,14 @@ function wire() {
     $('#scanCharsBtn').disabled = true;
     try {
       const r = await sendToTab(tab.id, { type: 'SCAN_CHARACTERS' });
-      const blocked = new Set(['gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud']);
+      const blocked = new Set([
+        'gmail', 'googlemail', 'google', 'yahoo', 'hotmail', 'outlook', 'icloud',
+        'dashboard', 'accessibility_new', 'face', 'drive_folder_upload', 'add', 'search',
+        'close', 'arrow_back', 'settings', 'help', 'folder', 'photo', 'video_library',
+        'smart_display', 'person', 'people', 'menu', 'upload', 'image', 'images', 'video',
+        'videos', 'characters', 'character', 'scenes', 'scene', 'library', 'tools', 'tool',
+        'bin', 'collapse', 'check', 'done', 'format', 'tune', 'auto_fix_high'
+      ]);
       scannedChars = ((r && r.characters) || [])
         .map((c) => String(c).replace(/^@+/, '').trim())
         .filter((c) => c && c.length >= 2 && !blocked.has(c.toLowerCase()));
@@ -1143,4 +1164,8 @@ function wire() {
   bindSettings();
   refreshUI();
   checkPage();
+  // Keep background service worker awake and trigger bridge poll regularly
+  setInterval(() => {
+    chrome.runtime.sendMessage({ type: 'POLL_BRIDGE_NOW' }).catch(() => {});
+  }, 1000);
 })();

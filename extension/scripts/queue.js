@@ -422,6 +422,41 @@
           .then((c) => reply({ characters: c }))
           .catch((e) => reply({ characters: [], error: String(e && e.message ? e.message : e) }));
         return true;
+      case 'REGISTER_CHARACTERS': {
+        const chars = msg.characters || [];
+        const projName = msg.projectName;
+        (async () => {
+          await A.loadSelectors();
+          if (projName && typeof A.setProjectTitle === 'function') {
+            await A.setProjectTitle(projName);
+          }
+          const results = [];
+          for (const c of chars) {
+            try {
+              const r = await A.registerCharacterInFlow(c);
+              results.push(r);
+            } catch (charErr) {
+              A.error(`[Character Module] Exception registering "${c && c.name}": ${charErr && charErr.message ? charErr.message : charErr}`);
+              results.push({ success: false, name: c && c.name, error: String(charErr && charErr.message ? charErr.message : charErr) });
+            }
+          }
+          const verify = await A.verifyCharactersExist(chars.map((x) => x.name));
+          reply({ success: true, results, scannedCharacters: verify.scanned, missing: verify.missing });
+        })().catch((e) => {
+          A.error(`[Character Module] Handler error: ${e && e.message ? e.message : e}`);
+          reply({ success: false, error: String(e && e.message ? e.message : e) });
+        });
+        return true;
+      }
+      case 'VERIFY_CHARACTERS': {
+        const names = msg.characterNames || [];
+        (async () => {
+          await A.loadSelectors();
+          const verify = await A.verifyCharactersExist(names);
+          reply({ success: verify.allFound, scannedCharacters: verify.scanned, missing: verify.missing });
+        })().catch((e) => reply({ success: false, error: String(e && e.message ? e.message : e) }));
+        return true;
+      }
       default:
         return false;
     }
@@ -450,5 +485,24 @@
   if (A.isFlowPage()) {
     A.loadSelectors();
     A.log('AsidZ AutoFlow active on Google Flow page');
+
+    // Persistent Content Script Bridge Poller (wakes MV3 worker instantly on job enqueue)
+    let csBridgeBusy = false;
+    setInterval(async () => {
+      if (csBridgeBusy) return;
+      csBridgeBusy = true;
+      try {
+        const res = await fetch('http://127.0.0.1:45788/api/agent/poll');
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data && data.job && data.job.id) {
+            chrome.runtime.sendMessage({ type: 'AGENT_DOM_JOB', job: data.job }).catch(() => {});
+          }
+        }
+      } catch (_) {
+      } finally {
+        csBridgeBusy = false;
+      }
+    }, 1500);
   }
 })();
